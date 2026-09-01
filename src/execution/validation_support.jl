@@ -2,26 +2,135 @@
 # representation and bounded kernel-ABI facts only; output-family semantics
 # remain with the lowering that owns them.
 
-function _require_properties(value, names::Tuple, context)
-    all(name -> hasproperty(value, name), names) || throw(
-        LocalWorkValidationError(
-            "$context requires $(join(string.(names), ", "))";
-            stage = :plan,
-            contract = :required_properties,
-            expected = names,
-            actual = propertynames(value),
-        )
-    )
+const _VALIDATION_STATUS_FIELDS = 6
+const _VALIDATION_FAILURE_CLASS = 1
+const _VALIDATION_CONTEXT_INDEX = 2
+const _VALIDATION_PRIMARY_RECORD = 3
+const _VALIDATION_SECONDARY_RECORD = 4
+const _VALIDATION_WITNESS_BITS = 5
+const _VALIDATION_STAGE_INDEX = 6
+
+struct _ValidatedPublicationStatus{D, H, C}
+    device::D
+    host::H
+    context::C
+    port::Symbol
+    stage::Int
+end
+
+"""One stage-qualified view of the sole program-level validation buffer."""
+struct _ProgramValidationTarget{D}
+    device::D
+    stage::Int32
+end
+Adapt.@adapt_structure _ProgramValidationTarget
+
+@inline _validation_encode(value::UInt32) = value
+@inline _validation_encode(value::UInt8) = UInt32(value)
+@inline _validation_encode(value::Int32) = reinterpret(UInt32, value)
+@inline _validation_decode_int32(value::UInt32) = reinterpret(Int32, value)
+
+@inline function _clear_validation_status!(status, lease_index::Integer)
+    @inbounds for field in 1:_VALIDATION_STATUS_FIELDS
+        status[field, lease_index] = UInt32(0)
+    end
     return nothing
 end
 
-function _exact_host_int(value, purpose)
+@inline function _store_program_validation_status!(
+        target::_ProgramValidationTarget,
+        lease_index::Integer,
+        failure_class,
+        context_index,
+        primary_record,
+        secondary_record,
+        witness_bits,
+    )
+    status = target.device
+    # Stages execute in semantic order on one provider tail.  Preserve the first
+    # failure as the sole diagnostic authority; later closed stages cannot
+    # replace its scientific provenance.
+    if @inbounds status[_VALIDATION_FAILURE_CLASS, lease_index] == UInt32(0)
+        _store_validation_status!(status, lease_index, failure_class,
+            context_index, primary_record, secondary_record, witness_bits)
+        @inbounds status[_VALIDATION_STAGE_INDEX, lease_index] =
+            reinterpret(UInt32, target.stage)
+    end
+    return nothing
+end
+
+@inline function _store_validation_status!(
+        status,
+        lease_index::Integer,
+        failure_class,
+        context_index,
+        primary_record,
+        secondary_record,
+        witness_bits,
+    )
+    @inbounds begin
+        status[_VALIDATION_FAILURE_CLASS, lease_index] =
+            _validation_encode(failure_class)
+        status[_VALIDATION_CONTEXT_INDEX, lease_index] =
+            _validation_encode(context_index)
+        status[_VALIDATION_PRIMARY_RECORD, lease_index] =
+            _validation_encode(primary_record)
+        status[_VALIDATION_SECONDARY_RECORD, lease_index] =
+            _validation_encode(secondary_record)
+        status[_VALIDATION_WITNESS_BITS, lease_index] =
+            _validation_encode(witness_bits)
+    end
+    return nothing
+end
+
+@inline _validation_status_word(status::_ValidatedPublicationStatus, row, lease_index) =
+    @inbounds status.host[row, lease_index]
+
+_is_publication_validation_error(error) = error isa LocalMathValidationError &&
+    error.contract in (
+        :runtime_stage_validation,
+        :runtime_key_validation,
+        :runtime_compacted_validation,
+        :runtime_ordered_fold_validation,
+    )
+
+_prepared_validation_statuses(prepared) = ()
+@inline function _prepared_validation_statuses(prepared::PreparedPlan)
+    # Every contextual Stage status views the same program-level device/host
+    # buffer. Settlement and success gating therefore need one representative,
+    # not a flattened tuple whose type grows with total program length.
+    return (first(prepared.runtime.launches).status,)
+end
+
+@inline _prepared_validation_status_groups(prepared::PreparedPlan) =
+    (map(launch -> launch.status, prepared.runtime.launches),)
+
+function _transfer_validation_statuses!(statuses::Tuple)
+    isempty(statuses) && return nothing
+    # Every Stage status is a contextual view of this same program-level
+    # buffer. One host-visible copy is therefore the complete settlement.
+    status = first(statuses)
+    copyto!(status.host, status.device)
+    return nothing
+end
+
+function _prepared_validation_error_at(prepared, lease_index::Int32)
+    for statuses in _prepared_validation_status_groups(prepared)
+        for status in statuses
+            error = _validated_publication_error(status, Int(lease_index))
+            error === nothing || return error
+        end
+    end
+    return nothing
+end
+
+function _exact_host_int(value, purpose; stage::Symbol = :plan)
     try
         return Int(value)
     catch
-        throw(LocalWorkValidationError(
+        throw(LocalMathValidationError(
             "$purpose must be exactly representable as Int";
-            stage = :plan,
+            stage,
             contract = :exact_host_integer,
             expected = Int,
             actual = value,
@@ -34,232 +143,44 @@ function _bounded_count(
         purpose;
         positive::Bool = false,
         terminal::Bool = false,
+        stage::Symbol = :plan,
     )
-    count = invoke(_exact_host_int, Tuple{Any, Any}, value, purpose)
+    count = _exact_host_int(value, purpose; stage)
     valid = positive ? count > 0 : count >= 0
-    valid || throw(LocalWorkValidationError(
+    valid || throw(LocalMathValidationError(
         "$purpose must be $(positive ? "positive" : "nonnegative")";
-        stage = :plan,
+        stage,
         contract = :bounded_count,
         expected = positive ? :positive : :nonnegative,
         actual = count,
     ))
-    return invoke(
-        _checked_int32_count,
-        Tuple{Integer, Any},
+    return _checked_int32_count(
         count,
         purpose;
         terminal,
+        stage,
     )
 end
 
-function _validate_topology_epoch(topology, context)
-    hasproperty(topology, :epoch) || throw(LocalWorkValidationError(
-        "$context topology requires epoch";
-        stage = :plan,
-        contract = :topology_epoch,
-        expected = UInt64,
-        actual = :missing,
-    ))
-    typeof(topology.epoch) === UInt64 || throw(LocalWorkValidationError(
-        "$context topology epoch must be exactly UInt64";
-        stage = :plan,
-        contract = :topology_epoch,
-        expected = UInt64,
-        actual = typeof(topology.epoch),
-    ))
-    return topology.epoch
-end
-
-function _validate_item_domain(work::LocalWork, item_count::Int, context)
-    work.items == (1:item_count) || throw(LocalWorkValidationError(
-        "LocalWork items must exactly cover the $context item domain"
-    ))
-    return nothing
-end
-
-function _validate_dense_route(
-        topology,
-        name::Symbol,
-        output,
-        item_count::Int;
-        context::Symbol,
-        terminal_capacity::Bool,
+# One authority for the bounded record domain shared by fixed-route and
+# runtime-keyed candidate storage. `int32_index=true` admits ordinary Int32
+# record indices; `terminal=true` additionally reserves the terminal sentinel.
+function _candidate_record_capacity(
+        item_count::Int,
+        maximum_emissions::Int,
+        purpose::Symbol;
+        int32_index::Bool = false,
+        terminal::Bool = false,
     )
-    hasproperty(topology.routes, output.route) || throw(
-        LocalWorkValidationError(
-            "$context port $name has no topology route $(output.route)";
-            stage = :plan,
-            contract = :route_presence,
-            port = name,
-            expected = output.route,
-            actual = keys(topology.routes),
-        )
-    )
-    hasproperty(topology.destination_counts, name) || throw(
-        LocalWorkValidationError(
-            "$context port $name has no destination count";
-            stage = :plan,
-            contract = :destination_count,
-            port = name,
-            expected = name,
-            actual = keys(topology.destination_counts),
-        )
-    )
-    route = getproperty(topology.routes, output.route)
-    maximum = typeof(output).parameters[2]
-    route isa AbstractMatrix || throw(LocalWorkValidationError(
-        "$context route $(output.route) must be a matrix";
-        stage = :plan,
-        contract = :route_layout,
-        port = name,
-        expected = AbstractMatrix,
-        actual = typeof(route),
-    ))
-    isconcretetype(eltype(route)) && eltype(route) <: Integer || throw(
-        LocalWorkValidationError(
-            "$context route $(output.route) requires a concrete integer element type";
-            stage = :plan,
-            contract = :route_element_type,
-            port = name,
-            expected = Integer,
-            actual = eltype(route),
-        )
-    )
-    size(route) == (maximum, item_count) || throw(LocalWorkValidationError(
-        "$context route $(output.route) must have exact shape ($maximum, $item_count)";
-        stage = :plan,
-        contract = :route_shape,
-        port = name,
-        expected = (maximum, item_count),
-        actual = size(route),
-    ))
-    destination_count = invoke(
-        _bounded_count,
-        Tuple{Any, Any},
-        getproperty(topology.destination_counts, name),
-        Symbol(name, :_destination_count),
-    )
-    capacity = invoke(
-        _checked_int_product,
-        Tuple{Integer, Integer, Any},
+    capacity = _checked_int_product(
         item_count,
-        maximum,
-        Symbol(name, :_route_capacity),
+        maximum_emissions,
+        purpose,
     )
-    capacity == length(route) || throw(LocalWorkValidationError(
-        "$context route $(output.route) has inconsistent capacity"
-    ))
-    terminal_capacity && invoke(
-        _checked_int32_count,
-        Tuple{Integer, Any},
+    (int32_index || terminal) && _checked_int32_count(
         capacity,
-        Symbol(name, :_record_capacity);
-        terminal = true,
+        purpose;
+        terminal,
     )
-    for value in route
-        destination = invoke(
-            _exact_host_int,
-            Tuple{Any, Any},
-            value,
-            Symbol(name, :_route_destination),
-        )
-        0 <= destination <= destination_count || throw(
-            LocalWorkValidationError(
-                "$context route $(output.route) contains an out-of-domain destination";
-                stage = :plan,
-                contract = :route_destination_domain,
-                port = name,
-                expected = 0:destination_count,
-                actual = destination,
-            )
-        )
-    end
-    return route, destination_count
-end
-
-struct _BindingRequirement{T, N, S}
-    name::Symbol
-    size::S
-    access::Symbol
-    allow_readwrite::Bool
-    role::Symbol
-end
-
-function _binding_requirement(
-        name::Symbol,
-        ::Type{T},
-        size::NTuple{N, Int},
-        access::Symbol;
-        allow_readwrite::Bool = false,
-        role::Symbol,
-    ) where {T, N}
-    access in (:read, :write, :readwrite) || error(
-        "invalid package-owned binding requirement"
-    )
-    return _BindingRequirement{T, N, typeof(size)}(
-        name,
-        size,
-        access,
-        allow_readwrite,
-        role,
-    )
-end
-
-function _validate_binding_requirement(
-        storage,
-        schema,
-        requirement::_BindingRequirement{T, N},
-    ) where {T, N}
-    name = requirement.name
-    facts = invoke(
-        _binding_facts,
-        Tuple{Any, Any, Any},
-        storage,
-        schema,
-        name,
-    )
-    facts.element_type === T || throw(LocalWorkValidationError(
-        "$(requirement.role) binding $name must have element type $T";
-        stage = :prepare,
-        contract = :binding_element_type,
-        binding = name,
-        expected = T,
-        actual = facts.element_type,
-    ))
-    facts.dimensions == N && facts.size == requirement.size || throw(
-        LocalWorkValidationError(
-            "$(requirement.role) binding $name must have exact size $(requirement.size)";
-            stage = :prepare,
-            contract = :binding_shape,
-            binding = name,
-            expected = requirement.size,
-            actual = facts.size,
-        )
-    )
-    access_ok = facts.access === nothing ||
-        facts.access === requirement.access ||
-        requirement.allow_readwrite && facts.access === :readwrite
-    access_ok || throw(LocalWorkValidationError(
-        "$(requirement.role) binding $name requires $(requirement.access) access";
-        stage = :prepare,
-        contract = :binding_access,
-        binding = name,
-        expected = requirement.access,
-        actual = facts.access,
-    ))
-    return nothing
-end
-
-function _validate_binding_requirements(storage, schema, requirements::Tuple)
-    for requirement in requirements
-        invoke(
-            _validate_binding_requirement,
-            Tuple{Any, Any, _BindingRequirement},
-            storage,
-            schema,
-            requirement,
-        )
-    end
-    return nothing
+    return capacity
 end
