@@ -2,6 +2,32 @@ using Test
 using LocalMath
 using Metal
 
+include(joinpath(@__DIR__, "..", "semantic_oracle_support.jl"))
+
+@testset "LocalMath tiny-domain semantic oracles on real Metal" begin
+    backend = Metal.MetalBackend()
+    result = run_semantic_oracle_suite(Metal.MtlArray, backend)
+    for law in (:unique, :reduce, :resolve, :collect, :fold)
+        witness = getproperty(result, law)
+        @test all(==(witness.oracle), witness.results)
+        @test witness.facts[1].lowering == witness.facts[2].lowering
+        @test witness.facts[1].executors == witness.facts[2].executors
+        @test witness.facts[1].laws == witness.facts[2].laws
+    end
+
+    candidate = run_semantic_failure_barrier(Metal.MtlArray, backend)
+    collect = run_collect_failure_barrier(Metal.MtlArray, backend)
+    fold = run_fold_failure_barrier(Metal.MtlArray, backend)
+    @test all(result -> result.failure isa LocalMath.LocalMathValidationError,
+        (candidate, collect, fold))
+    @test candidate.conflicted == Int32[-7]
+    @test candidate.successor == fill(Int32(-9), 2)
+    @test collect.count == Int32[0]
+    @test collect.successor == fill(Int32(-9), 2)
+    @test fold.accumulator == Int32[-7]
+    @test fold.successor == fill(Int32(-9), 2)
+end
+
 struct ProductRelationMetalEvaluator end
 @inline function (::ProductRelationMetalEvaluator)(item::Int32, reads, parameters)
     sample = getfield(reads, 1)[1]
