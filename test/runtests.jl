@@ -88,6 +88,7 @@ const LOCALMATH_INCLUDED_TESTS = (
     "test_storage_authoring.jl",
     "test_prepare_authoring.jl",
     "test_localmath_authoring.jl",
+    "test_semantic_oracles.jl",
 )
 
 @testset "LocalMath test runner inventory" begin
