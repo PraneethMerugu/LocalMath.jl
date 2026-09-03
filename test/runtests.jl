@@ -1,59 +1,7 @@
-using Aqua
-using ExplicitImports
+using ParallelTestRunner
 using Test
 import LocalMath
 
-@testset "LocalMath package quality" begin
-    Aqua.test_all(LocalMath; ambiguities = false)
-    # These qualified non-public accesses implement the reviewed central
-    # admission, compiler-identity, storage-alias, and backend-validation
-    # boundaries. Keep the allowlist exact so new private reliance still fails.
-    qualified_internal_boundary = (
-        Symbol("@adapt_structure"),
-        Symbol("@atomic"),
-        Symbol("@nospecializeinfer"),
-        :Argument,
-        :CodeInfo,
-        :CodeInstance,
-        :Compiler,
-        :Const,
-        :LLVMPtr,
-        :MethodInstance,
-        :PkgId,
-        :SSAValue,
-        :SlotNumber,
-        :Typeof,
-        :apply_type,
-        :checked_mul,
-        :code_typed_by_type,
-        :datatype_alignment,
-        :device,
-        :functional,
-        :get_world_counter,
-        :ifelse,
-        :inferencebarrier,
-        :invoke_in_world,
-        :loaded_modules,
-        :mightalias,
-        :return_type,
-        :throw_boundserror,
-        :throw_inexacterror,
-        :typename,
-        :typesof,
-        :uncompressed_ast,
-        :unwrap_unionall,
-    )
-    ExplicitImports.test_explicit_imports(
-        LocalMath;
-        all_qualified_accesses_are_public =
-            (; ignore = qualified_internal_boundary),
-    )
-    @test isempty(Test.detect_ambiguities(
-        LocalMath, Base; recursive = true
-    ))
-end
-
-include("support.jl")
 const LOCALMATH_INCLUDED_TESTS = (
     "test_public_api.jl",
     "test_spatial_model.jl",
@@ -91,10 +39,91 @@ const LOCALMATH_INCLUDED_TESTS = (
     "test_semantic_oracles.jl",
 )
 
-@testset "LocalMath test runner inventory" begin
-    discovered = sort(filter(name ->
-        startswith(name, "test_") && endswith(name, ".jl"), readdir(@__DIR__)))
-    @test sort(collect(LOCALMATH_INCLUDED_TESTS)) == discovered
+const LOCALMATH_TEST_SUITE = Dict{String, Expr}(
+    "package_quality" => quote
+        using Aqua
+        using ExplicitImports
+
+        @testset "LocalMath package quality" begin
+            Aqua.test_all(LocalMath; ambiguities = false)
+            # These qualified non-public accesses implement the reviewed
+            # central admission, compiler-identity, storage-alias, and
+            # backend-validation boundaries. Keep the allowlist exact so new
+            # private reliance still fails.
+            qualified_internal_boundary = (
+                Symbol("@adapt_structure"),
+                Symbol("@atomic"),
+                Symbol("@nospecializeinfer"),
+                :Argument,
+                :CodeInfo,
+                :CodeInstance,
+                :Compiler,
+                :Const,
+                :LLVMPtr,
+                :MethodInstance,
+                :PkgId,
+                :SSAValue,
+                :SlotNumber,
+                :Typeof,
+                :apply_type,
+                :checked_mul,
+                :code_typed_by_type,
+                :datatype_alignment,
+                :device,
+                :functional,
+                :get_world_counter,
+                :ifelse,
+                :inferencebarrier,
+                :invoke_in_world,
+                :loaded_modules,
+                :mightalias,
+                :return_type,
+                :throw_boundserror,
+                :throw_inexacterror,
+                :typename,
+                :typesof,
+                :uncompressed_ast,
+                :unwrap_unionall,
+            )
+            ExplicitImports.test_explicit_imports(
+                LocalMath;
+                all_qualified_accesses_are_public =
+                    (; ignore = qualified_internal_boundary),
+            )
+            @test isempty(Test.detect_ambiguities(
+                LocalMath, Base; recursive = true
+            ))
+        end
+    end,
+    "test_runner_inventory" => quote
+        @testset "LocalMath test runner inventory" begin
+            discovered = sort(filter(
+                name -> startswith(name, "test_") && endswith(name, ".jl"),
+                readdir(@__DIR__),
+            ))
+            @test sort(collect($LOCALMATH_INCLUDED_TESTS)) == discovered
+        end
+    end,
+)
+
+for test_file in LOCALMATH_INCLUDED_TESTS
+    test_name = first(splitext(test_file))
+    LOCALMATH_TEST_SUITE[test_name] = quote
+        include($(joinpath(@__DIR__, "support.jl")))
+        include($(joinpath(@__DIR__, test_file)))
+    end
 end
 
-foreach(include, LOCALMATH_INCLUDED_TESTS)
+const LOCALMATH_TEST_INITIALIZATION = quote
+    using Test
+    import KernelAbstractions
+    import LocalMath
+end
+
+ParallelTestRunner.runtests(
+    LocalMath,
+    ARGS;
+    testsuite = LOCALMATH_TEST_SUITE,
+    init_code = LOCALMATH_TEST_INITIALIZATION,
+    serial = ["package_quality", "test_runner_inventory"],
+)
