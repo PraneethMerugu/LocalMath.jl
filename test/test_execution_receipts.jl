@@ -2,40 +2,11 @@ using Test
 import LocalMath
 const LWER = LocalMath
 
-struct ReceiptTestNode end
-struct ReceiptTestEvaluator{T}
-    value::T
-end
-@inline (evaluator::ReceiptTestEvaluator)(item::Int32, reads, parameters) =
-    (value = LWER.UniqueValue(evaluator.value + item),)
 struct ReceiptProviderFailureEvaluator end
 @inline function (::ReceiptProviderFailureEvaluator)(
         item::Int32, reads, parameters)
     item == Int32(0) && return (value = LWER.UniqueValue(item),)
     error("intentional provider execution failure")
-end
-
-function _receipt_test_preparation(value::Int32;
-        dependency_arity::Int = 0, lease_capacity::Int = 1,
-        evaluator = ReceiptTestEvaluator(value))
-    space = LWER.Space(ReceiptTestNode, 2)
-    output = LWER.Field(space, Int32)
-    relation = LWER.IdentityRelation(space)
-    publication = LWER.Publication((LWER.FieldPublication(
-        output, relation, LWER.PublicationValue(:value)),),
-        LWER.Unique(Int32))
-    stage = LWER.Stage(space, NamedTuple(), (publication,),
-        LWER.Evaluator(evaluator), LWER.Control(),
-        LWER.SourceOrigin(:execution_receipt_test, 1))
-    storage = fill(Int32(-1), 2)
-    bound = LWER._bind_law(LWER.LocalLaw(stage),
-        LWER._StructuralBinding(
-            (LWER._field_storage_binding(output, storage),),
-            (LWER._relation_storage_binding(relation),)))
-    backend = LWER.KernelAbstractions.get_backend(storage)
-    prepared = LWER.prepare(LWER.plan(bound; backend);
-        dependency_arity, lease_capacity)
-    return prepared, storage
 end
 
 function _receipt_test_conflict_preparation(; dependency_arity::Int = 0)
