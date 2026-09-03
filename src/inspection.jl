@@ -286,11 +286,11 @@ function _show_publication_summary(io::IO, publication::Publication)
     show(IOContext(io, :compact => true), destinations)
 end
 
-function _show_law_summary(io::IO, work::LocalLaw)
-    fields, relations, collections = _law_descriptor_requirements(work)
+function _show_law_summary(io::IO, law::LocalLaw)
+    fields, relations, collections = _law_descriptor_requirements(law)
     println(io, "LocalLaw")
     print(io, "  parameters: ")
-    _show_parameter_summary(io, work.parameters)
+    _show_parameter_summary(io, law.parameters)
     println(io, "\n  descriptors:")
     for field in fields
         print(io, "    field: ")
@@ -308,7 +308,7 @@ function _show_law_summary(io::IO, work::LocalLaw)
         println(io)
     end
     println(io, "  stages:")
-    for (index, stage) in enumerate(work.stages)
+    for (index, stage) in enumerate(law.stages)
         print(io, "    stage ", index, "\n      domain: ")
         _show_space_summary(io, stage.source; identity = false)
         print(io, "\n      reads:")
@@ -341,14 +341,14 @@ function _show_law_summary(io::IO, work::LocalLaw)
             print(io, "\n      origin: ")
             _show_validation_origin(io, stage.origin)
         end
-        index == length(work.stages) || println(io)
+        index == length(law.stages) || println(io)
     end
 end
 
-Base.show(io::IO, work::LocalLaw) =
-    print(io, "LocalLaw(stages=", length(work.stages), ")")
-Base.show(io::IO, ::MIME"text/plain", work::LocalLaw) =
-    _show_law_summary(io, work)
+Base.show(io::IO, law::LocalLaw) =
+    print(io, "LocalLaw(stages=", length(law.stages), ")")
+Base.show(io::IO, ::MIME"text/plain", law::LocalLaw) =
+    _show_law_summary(io, law)
 Base.show(io::IO, plan::Plan) =
     print(io, "Plan(family=stage_program",
         ", backend=", typeof(plan.backend), ")")

@@ -47,7 +47,7 @@ end
         stage = :execute,
         contract = :provider_execution,
     )
-    @test LMID._with_work_source_origin(global_error, law,
+    @test LMID._with_law_source_origin(global_error, law,
         :execute, :provider_execution) === global_error
 
     authored = LMID._with_source_origin(

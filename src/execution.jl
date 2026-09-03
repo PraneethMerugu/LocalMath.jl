@@ -55,19 +55,19 @@ end
     return :(($(values...),))
 end
 
-struct _SuccessfulWorkGate{G,S} <: AbstractVector{Bool}
+struct _SuccessfulLawGate{G,S} <: AbstractVector{Bool}
     parent::G
     statuses::S
     lease_index::Int32
 end
 
-Base.size(::_SuccessfulWorkGate) = (1,)
-Base.length(::_SuccessfulWorkGate) = 1
-Base.strides(::_SuccessfulWorkGate) = (1,)
-Base.IndexStyle(::Type{<:_SuccessfulWorkGate}) = IndexLinear()
+Base.size(::_SuccessfulLawGate) = (1,)
+Base.length(::_SuccessfulLawGate) = 1
+Base.strides(::_SuccessfulLawGate) = (1,)
+Base.IndexStyle(::Type{<:_SuccessfulLawGate}) = IndexLinear()
 
-function Adapt.adapt_structure(to, gate::_SuccessfulWorkGate)
-    return _SuccessfulWorkGate(
+function Adapt.adapt_structure(to, gate::_SuccessfulLawGate)
+    return _SuccessfulLawGate(
         Adapt.adapt(to, gate.parent),
         Adapt.adapt(to, gate.statuses),
         gate.lease_index,
@@ -86,14 +86,14 @@ end
     )
 end
 
-@inline function Base.getindex(gate::_SuccessfulWorkGate, index::Integer)
+@inline function Base.getindex(gate::_SuccessfulLawGate, index::Integer)
     @boundscheck index == 1 || throw(BoundsError(gate, index))
     return @inbounds(gate.parent[1]) && _validation_prefix_succeeded(
         gate.statuses, gate.lease_index
     )
 end
 
-function KernelAbstractions.get_backend(gate::_SuccessfulWorkGate)
+function KernelAbstractions.get_backend(gate::_SuccessfulLawGate)
     backend = KernelAbstractions.get_backend(gate.parent)
     all(status -> KernelAbstractions.get_backend(status) == backend,
         gate.statuses) || throw(LocalMathValidationError(
@@ -108,7 +108,7 @@ end
 
 function _success_gate(prepared::PreparedPlan, lease_index::Int32, parent)
     current_task() === prepared.owner || throw(LocalMathValidationError(
-        "a success gate belongs to the task that prepared its source work";
+        "a success gate belongs to the task that prepared its source law";
         stage = :execute,
         contract = :receipt_owner,
         expected = prepared.owner,
@@ -118,13 +118,13 @@ function _success_gate(prepared::PreparedPlan, lease_index::Int32, parent)
         status -> status.device, _prepared_validation_statuses(prepared)
     )
     isempty(statuses) && throw(LocalMathValidationError(
-        "success_gate requires a source work with device validation status";
+        "success_gate requires a source law with device validation status";
         stage = :prepare,
         contract = :validation_status,
         expected = :device_validation_status,
         actual = :none,
     ))
-    return _SuccessfulWorkGate(
+    return _SuccessfulLawGate(
         parent, statuses, lease_index
     )
 end
@@ -395,7 +395,7 @@ function _observe_receipt_failure(receipt::ExecutionReceipt)
     error = _prepared_validation_error_at(
         receipt.prepared, receipt.lease_index)
     error === nothing && return nothing
-    return _with_work_source_origin(error,
+    return _with_law_source_origin(error,
         _plan_law(receipt.prepared.plan), :wait, error.contract)
 end
 

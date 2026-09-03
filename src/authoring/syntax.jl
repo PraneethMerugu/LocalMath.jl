@@ -199,7 +199,8 @@ end
 _lm_namedtuple(pairs) = Expr(:tuple, Expr(:parameters,
     (Expr(:kw, name, value) for (name, value) in pairs)...))
 
-function _lm_stage(spec, body::Expr, source; label = nothing)
+"""Parse the stage binder and its Cartesian boundary contract at macro time."""
+function _lm_stage_domain(spec, source)
     binder, source_expression, stage_options =
         _lm_binder(spec, source)
     tuple_binder = binder isa Expr && binder.head === :tuple
@@ -230,9 +231,13 @@ function _lm_stage(spec, body::Expr, source; label = nothing)
         source_mode !== :plain &&
             (semantic_source_expression = source_expression.args[2])
     end
-    parameter_expression = stage_options.parameters
-    declarations = _lm_parameters(parameter_expression, source)
-    parameter_names = Tuple(declaration.args[1] for declaration in declarations)
+    return (; binder, source_expression, semantic_source_expression,
+        stage_options, cartesian, binder_symbols, source_mode, halo)
+end
+
+"""Discover and lower bounded reads while preserving first-use order."""
+function _lm_discover_stage_accesses(domain_syntax, source)
+    (; binder, cartesian, binder_symbols, source_mode, halo) = domain_syntax
     reads = Union{_LocalMathReadSyntax,_LocalMathCollectionReadSyntax}[]
     read_roles = Dict{Tuple{Symbol,Union{Nothing,Symbol},Symbol},Symbol}()
     used_read_roles = Dict{Symbol,Int}()
@@ -433,6 +438,302 @@ function _lm_stage(spec, body::Expr, source; label = nothing)
             (transform(argument; requested_mode) for argument in expression.args)...)
     end
 
+    return (; reads, transform, relation_index,
+        synthetic_relation_expressions, reads_symbol, parameters_symbol,
+        item_symbol)
+end
+
+"""Parse one ordered-state block into the existing OrderedFold syntax fact."""
+function _lm_parse_ordered_state!(
+        statement, line, domain_syntax, access, parse_state, source)
+    (; binder) = domain_syntax
+    (; transform, reads_symbol, item_symbol) = access
+    (; publications, publication_port, evaluator_aliases) = parse_state
+    length(statement.args) == 4 || _lm_error(
+        "@ordered requires `(by=..., state=...)` and a body", source;
+        actual = statement)
+    specification, ordered_body = statement.args[3], statement.args[4]
+    specification isa Expr && specification.head === :tuple || _lm_error(
+        "@ordered requires `(by=..., state=...)`", source;
+        actual = specification)
+    options = Dict{Symbol,Any}()
+    for option in specification.args
+        option isa Expr && option.head === :(=) &&
+            option.args[1] in (:by, :state) || _lm_error(
+                "@ordered accepts only by and state", source; actual=option)
+        options[option.args[1]] = option.args[2]
+    end
+    all(haskey(options, name) for name in (:by, :state)) || _lm_error(
+        "@ordered requires by and state", source; actual=keys(options))
+    by = options[:by]
+    source_ordered = _lm_literal_symbol(by) === :source
+    source_ordered || by isa Expr && by.head === :tuple && length(by.args) == 2 ||
+        _lm_error("@ordered by must be `(key, identity)`", source;
+            actual=by)
+    state_expression = options[:state]
+    state_expression isa Expr && state_expression.head === :tuple ||
+        _lm_error("@ordered state must be target => initial pairs", source;
+            actual=state_expression)
+    state_pairs = Pair{Symbol,Symbol}[]
+    for pair in state_expression.args
+        _lm_call(pair, :(=>)) && length(pair.args) == 3 &&
+            pair.args[2] isa Symbol && pair.args[3] isa Symbol ||
+            _lm_error("ordered state entries must be `target => initial`",
+                source; actual=pair)
+        push!(state_pairs, pair.args[2] => pair.args[3])
+    end
+    targets = first.(state_pairs)
+    state_symbol = gensym(:state)
+    transition_reads = reads_symbol
+    transition_item = item_symbol
+    function ordered_transform(value)
+        value isa Symbol && haskey(evaluator_aliases, value) &&
+            return ordered_transform(evaluator_aliases[value])
+        value === binder && return transition_item
+        value isa Expr || return value
+        if value.head === :ref && value.args[1] isa Symbol &&
+                value.args[1] in targets
+            length(value.args) == 2 || _lm_error(
+                "ordered state reads require one linear index", source;
+                actual=value)
+            return :(getproperty($state_symbol,
+                $(QuoteNode(value.args[1])))[$(ordered_transform(value.args[2]))])
+        elseif value.head === :ref
+            # A descriptor-rooted reference is a new bounded read and
+            # must pass through the ordinary access lowering. References
+            # rooted in an authored alias (including record projections
+            # such as `event.sites[1]`) must instead expand that alias
+            # recursively inside the ordered transition. Sending the
+            # latter back through `transform` would leave the alias as an
+            # accidental global and destroy inference.
+            root = value.args[1]
+            if root isa Symbol && !haskey(evaluator_aliases, root)
+                return transform(value)
+            end
+            return Expr(:ref,
+                (ordered_transform(arg) for arg in value.args)...)
+        end
+        return Expr(value.head, (ordered_transform(arg) for arg in value.args)...)
+    end
+    local_statements = Any[]
+    writes = Dict{Symbol,Any}()
+    halt = false
+    function parse_ordered_block(block, condition=true)
+        block isa Expr && block.head === :block ||
+            _lm_error("@ordered requires a begin/end body", source;
+                actual=block)
+        for value in block.args
+            value isa LineNumberNode && continue
+            if _lm_call(value, :halt_when) && length(value.args) == 2
+                halt === false || _lm_error(
+                    "@ordered admits one halt_when condition", source;
+                    actual=value)
+                halt = ordered_transform(value.args[2])
+            elseif value isa Expr && value.head === :if
+                length(value.args) in (2,3) || _lm_error(
+                    "ordered condition has invalid shape", source; actual=value)
+                length(value.args) == 3 && !(value.args[3] === nothing) &&
+                    _lm_error("ordered state conditions do not admit else",
+                        source; actual=value)
+                combined = condition === true ? ordered_transform(value.args[1]) :
+                    :($condition && $(ordered_transform(value.args[1])))
+                parse_ordered_block(value.args[2], combined)
+            elseif value isa Expr && value.head === :(=) &&
+                    value.args[1] isa Expr && value.args[1].head === :ref &&
+                    value.args[1].args[1] in targets
+                lhs, rhs = value.args
+                name = lhs.args[1]
+                haskey(writes, name) && _lm_error(
+                    "each ordered state component may be assigned once",
+                    source; actual=name)
+                length(lhs.args) == 2 || _lm_error(
+                    "ordered state writes require one bounded index or tuple",
+                    source; actual=lhs)
+                destinations = lhs.args[2] isa Expr &&
+                    lhs.args[2].head === :tuple ? Tuple(lhs.args[2].args) :
+                    (lhs.args[2],)
+                replacements = rhs isa Expr && rhs.head === :tuple ?
+                    Tuple(rhs.args) : (rhs,)
+                length(destinations) == length(replacements) || _lm_error(
+                    "ordered state destination and value widths must match",
+                    source; actual=value)
+                keys = Expr(:tuple, (:(Int32($(ordered_transform(key))))
+                    for key in destinations)...)
+                vals = Expr(:tuple,
+                    (ordered_transform(replacement) for replacement in replacements)...)
+                count = condition === true ? Int32(length(destinations)) :
+                    :(ifelse($condition, Int32($(length(destinations))), Int32(0)))
+                writes[name] = :($(GlobalRef(LocalMath, :_authoring_bounded_writes))(
+                    $keys, $vals, $count))
+            elseif value isa Expr && value.head === :(=) &&
+                    value.args[1] isa Symbol
+                push!(local_statements, Expr(:(=), value.args[1],
+                    ordered_transform(value.args[2])))
+            else
+                _lm_error("ordered bodies admit local values, conditions, and bounded state assignments",
+                    source; actual=value)
+            end
+        end
+    end
+    parse_ordered_block(ordered_body)
+    isempty(writes) && _lm_error("@ordered requires a state assignment", source)
+    missing_targets = filter(target -> !haskey(writes, target), targets)
+    isempty(missing_targets) || _lm_error(
+        "@ordered must define every declared state component in one FoldStep",
+        source; actual=Tuple(missing_targets))
+    update_pairs = Pair{Symbol,Any}[]
+    for pair in state_pairs
+        target = first(pair)
+        expression = writes[target]
+        push!(update_pairs, target => expression)
+    end
+    transition = Expr(:->,
+        Expr(:tuple, state_symbol, gensym(:event), transition_item,
+            transition_reads),
+        Expr(:block, local_statements...,
+            :(return $(GlobalRef(LocalMath, :_authoring_fold_step))(
+                $(_lm_namedtuple(update_pairs)), $(ordered_transform(halt))))))
+    key, identity = source_ordered ? (item_symbol, nothing) :
+        (transform(by.args[1]), transform(by.args[2]))
+    port = publication_port(nothing, :ordered_state)
+    push!(publications, _LocalMathPublicationSyntax(nothing, nothing,
+        port, :ordered_state,
+        source_ordered ? key : Expr(:tuple, key, identity),
+        (; state_pairs=Tuple(state_pairs), transition, by,
+            source_ordered), line))
+    return nothing
+end
+
+"""Parse one field/collection publication equation when the statement is one."""
+function _lm_parse_publication!(
+        statement, current_line, domain_syntax, access, parse_state, source)
+    is_publication = _lm_call(statement, :publish) ||
+        statement.head in (:(=), :(+=)) && statement.args[1] isa Expr &&
+        statement.args[1].head === :ref
+    is_publication || return false
+    (; binder) = domain_syntax
+    (; relation_index, transform) = access
+    (; publications, publication_port, evaluator_type_aliases) = parse_state
+    if _lm_call(statement, :publish)
+        positional, keywords = _lm_call_options(statement, source)
+        length(positional) == 2 || _lm_error(
+            "publish requires a destination Field and one value", source;
+            actual = statement)
+        field, value = positional
+        field isa Symbol || _lm_error(
+            "publish destination must be a simple Field binding", source;
+            actual = field)
+        all(haskey(keywords, key) for key in (:route, :key)) || _lm_error(
+            "runtime publish requires explicit route and key keywords",
+            source; actual = statement)
+        relation = keywords[:route]
+        relation isa Symbol || _lm_error(
+            "publish route must be a simple RuntimeRelation binding",
+            source; actual = relation)
+        law_value = get(keywords, :law, QuoteNode(:unique))
+        law = law_value isa QuoteNode ? law_value.value : law_value
+        law in (:unique, :reduce, :resolve) || _lm_error(
+            "runtime publish law must be :unique, :reduce, or :resolve",
+            source; actual = law)
+        allowed = law === :unique ?
+            (:route, :key, :law, :when, :maximum) :
+            law === :reduce ?
+            (:route, :key, :law, :when, :maximum, :op, :seed,
+                :onempty, :order) :
+                (:route, :key, :law, :when, :maximum, :score, :lower,
+                :upper, :sense, :tie, :onempty)
+        _lm_require_keywords(keywords, allowed, :publish, source)
+        delete!(keywords, :route)
+        delete!(keywords, :law)
+        if law === :resolve
+            all(haskey(keywords, key) for key in (:score, :lower, :upper)) ||
+                _lm_error("runtime Resolve requires score, lower, and upper",
+                    source; actual = statement)
+            keywords[:payload] = value
+            haskey(keywords, :tie) &&
+                (keywords[:_tie_fields] = _lm_explicit_tie_fields(
+                    keywords[:tie], binder, source,
+                    evaluator_type_aliases))
+        end
+        port = publication_port(field, law)
+        transformed_options = (; (key => transform(val)
+            for (key, val) in keywords)...)
+        push!(publications, _LocalMathPublicationSyntax(field, relation,
+            port, law, transform(value), transformed_options, current_line))
+    elseif statement.head in (:(=), :(+=)) && statement.args[1] isa Expr &&
+            statement.args[1].head === :ref
+        lhs, rhs = statement.args
+        length(lhs.args) >= 2 || _lm_error(
+            "publication targets require a bounded index", source; actual = lhs)
+        field, indices = lhs.args[1], Tuple(lhs.args[2:end])
+        field isa Symbol || _lm_error(
+            "publication descriptors must be simple bindings", source;
+            actual = field)
+        relation = relation_index(indices, field)
+        relation === missing && _lm_error(
+            "a publication index must be the item or `relation(item)`",
+            source; actual = indices)
+        law, value, options = statement.head === :(+=) ?
+            (:reduce, rhs, NamedTuple()) : (:unique, rhs, NamedTuple())
+        if _lm_call(rhs, :reduce_to)
+            positional, keywords = _lm_call_options(rhs, source)
+            _lm_require_keywords(keywords,
+                (:op, :seed, :order, :onempty, :when, :maximum),
+                :reduce_to, source)
+            length(positional) == 1 || _lm_error(
+                "reduce_to requires one contribution", source; actual = rhs)
+            law, value = :reduce, only(positional)
+            options = (; (key => val for (key, val) in keywords)...)
+        elseif _lm_call(rhs, :resolve_to)
+            positional, keywords = _lm_call_options(rhs, source)
+            _lm_require_keywords(keywords,
+                (:score, :payload, :lower, :upper, :sense, :when,
+                    :maximum, :tie, :onempty), :resolve_to, source)
+            isempty(positional) || _lm_error(
+                "resolve_to uses score and payload keywords", source; actual = rhs)
+            all(haskey(keywords, key) for key in (:score, :payload, :lower, :upper)) ||
+                _lm_error("resolve_to requires score, payload, lower, and upper",
+                    source; actual = rhs)
+            haskey(keywords, :tie) &&
+                (keywords[:_tie_fields] = _lm_explicit_tie_fields(
+                    keywords[:tie], binder, source,
+                    evaluator_type_aliases))
+            law, value = :resolve, nothing
+            options = (; (key => val for (key, val) in keywords)...)
+        elseif _lm_call(rhs, :bounded_collect)
+            positional, keywords = _lm_call_options(rhs, source)
+            _lm_require_keywords(keywords,
+                (:maximum, :group, :groups, :overflow, :when,
+                    :order, :projection),
+                :bounded_collect, source)
+            length(positional) == 1 || _lm_error(
+                "bounded_collect requires one record", source; actual = rhs)
+            haskey(keywords, :maximum) || _lm_error(
+                "bounded_collect requires a static maximum", source; actual = rhs)
+            overflow = _lm_literal_symbol(get(keywords, :overflow,
+                QuoteNode(:reject)))
+            overflow === :reject || _lm_error(
+                "bounded_collect currently supports only overflow=:reject",
+                source; actual = overflow)
+            haskey(keywords, :group) == haskey(keywords, :groups) ||
+                _lm_error("routed Collect requires both group and groups",
+                    source; actual = keys(keywords))
+            law, value = :collect, only(positional)
+            options = (; (key => val for (key, val) in keywords)...)
+        end
+        port = publication_port(field, law)
+        transformed_value = value === nothing ? nothing : transform(value)
+        transformed_options = (; (key => transform(val)
+            for (key, val) in pairs(options))...)
+        push!(publications, _LocalMathPublicationSyntax(field, relation,
+            port, law, transformed_value, transformed_options, current_line))
+    end
+    return true
+end
+
+"""Parse stage statements in authored order using the dedicated law parsers."""
+function _lm_parse_stage_body(body, domain_syntax, access, source)
+    (; transform) = access
     publications = _LocalMathPublicationSyntax[]
     used_publication_ports = Dict{Symbol,Int}()
     function publication_port(field, law::Symbol)
@@ -444,281 +745,18 @@ function _lm_stage(spec, body::Expr, source; label = nothing)
     evaluator_statements = Any[]
     evaluator_aliases = Dict{Symbol,Any}()
     evaluator_type_aliases = Dict{Symbol,Any}()
-    function ordered_syntax(statement, line)
-        length(statement.args) == 4 || _lm_error(
-            "@ordered requires `(by=..., state=...)` and a body", source;
-            actual = statement)
-        specification, ordered_body = statement.args[3], statement.args[4]
-        specification isa Expr && specification.head === :tuple || _lm_error(
-            "@ordered requires `(by=..., state=...)`", source;
-            actual = specification)
-        options = Dict{Symbol,Any}()
-        for option in specification.args
-            option isa Expr && option.head === :(=) &&
-                option.args[1] in (:by, :state) || _lm_error(
-                    "@ordered accepts only by and state", source; actual=option)
-            options[option.args[1]] = option.args[2]
-        end
-        all(haskey(options, name) for name in (:by, :state)) || _lm_error(
-            "@ordered requires by and state", source; actual=keys(options))
-        by = options[:by]
-        source_ordered = _lm_literal_symbol(by) === :source
-        source_ordered || by isa Expr && by.head === :tuple && length(by.args) == 2 ||
-            _lm_error("@ordered by must be `(key, identity)`", source;
-                actual=by)
-        state_expression = options[:state]
-        state_expression isa Expr && state_expression.head === :tuple ||
-            _lm_error("@ordered state must be target => initial pairs", source;
-                actual=state_expression)
-        state_pairs = Pair{Symbol,Symbol}[]
-        for pair in state_expression.args
-            _lm_call(pair, :(=>)) && length(pair.args) == 3 &&
-                pair.args[2] isa Symbol && pair.args[3] isa Symbol ||
-                _lm_error("ordered state entries must be `target => initial`",
-                    source; actual=pair)
-            push!(state_pairs, pair.args[2] => pair.args[3])
-        end
-        targets = first.(state_pairs)
-        state_symbol = gensym(:state)
-        transition_reads = reads_symbol
-        transition_item = item_symbol
-        function ordered_transform(value)
-            value isa Symbol && haskey(evaluator_aliases, value) &&
-                return ordered_transform(evaluator_aliases[value])
-            value === binder && return transition_item
-            value isa Expr || return value
-            if value.head === :ref && value.args[1] isa Symbol &&
-                    value.args[1] in targets
-                length(value.args) == 2 || _lm_error(
-                    "ordered state reads require one linear index", source;
-                    actual=value)
-                return :(getproperty($state_symbol,
-                    $(QuoteNode(value.args[1])))[$(ordered_transform(value.args[2]))])
-            elseif value.head === :ref
-                # A descriptor-rooted reference is a new bounded read and
-                # must pass through the ordinary access lowering. References
-                # rooted in an authored alias (including record projections
-                # such as `event.sites[1]`) must instead expand that alias
-                # recursively inside the ordered transition. Sending the
-                # latter back through `transform` would leave the alias as an
-                # accidental global and destroy inference.
-                root = value.args[1]
-                if root isa Symbol && !haskey(evaluator_aliases, root)
-                    return transform(value)
-                end
-                return Expr(:ref,
-                    (ordered_transform(arg) for arg in value.args)...)
-            end
-            return Expr(value.head, (ordered_transform(arg) for arg in value.args)...)
-        end
-        local_statements = Any[]
-        writes = Dict{Symbol,Any}()
-        halt = false
-        function parse_ordered_block(block, condition=true)
-            block isa Expr && block.head === :block ||
-                _lm_error("@ordered requires a begin/end body", source;
-                    actual=block)
-            for value in block.args
-                value isa LineNumberNode && continue
-                if _lm_call(value, :halt_when) && length(value.args) == 2
-                    halt === false || _lm_error(
-                        "@ordered admits one halt_when condition", source;
-                        actual=value)
-                    halt = ordered_transform(value.args[2])
-                elseif value isa Expr && value.head === :if
-                    length(value.args) in (2,3) || _lm_error(
-                        "ordered condition has invalid shape", source; actual=value)
-                    length(value.args) == 3 && !(value.args[3] === nothing) &&
-                        _lm_error("ordered state conditions do not admit else",
-                            source; actual=value)
-                    combined = condition === true ? ordered_transform(value.args[1]) :
-                        :($condition && $(ordered_transform(value.args[1])))
-                    parse_ordered_block(value.args[2], combined)
-                elseif value isa Expr && value.head === :(=) &&
-                        value.args[1] isa Expr && value.args[1].head === :ref &&
-                        value.args[1].args[1] in targets
-                    lhs, rhs = value.args
-                    name = lhs.args[1]
-                    haskey(writes, name) && _lm_error(
-                        "each ordered state component may be assigned once",
-                        source; actual=name)
-                    length(lhs.args) == 2 || _lm_error(
-                        "ordered state writes require one bounded index or tuple",
-                        source; actual=lhs)
-                    destinations = lhs.args[2] isa Expr &&
-                        lhs.args[2].head === :tuple ? Tuple(lhs.args[2].args) :
-                        (lhs.args[2],)
-                    replacements = rhs isa Expr && rhs.head === :tuple ?
-                        Tuple(rhs.args) : (rhs,)
-                    length(destinations) == length(replacements) || _lm_error(
-                        "ordered state destination and value widths must match",
-                        source; actual=value)
-                    keys = Expr(:tuple, (:(Int32($(ordered_transform(key))))
-                        for key in destinations)...)
-                    vals = Expr(:tuple,
-                        (ordered_transform(replacement) for replacement in replacements)...)
-                    count = condition === true ? Int32(length(destinations)) :
-                        :(ifelse($condition, Int32($(length(destinations))), Int32(0)))
-                    writes[name] = :($(GlobalRef(LocalMath, :_authoring_bounded_writes))(
-                        $keys, $vals, $count))
-                elseif value isa Expr && value.head === :(=) &&
-                        value.args[1] isa Symbol
-                    push!(local_statements, Expr(:(=), value.args[1],
-                        ordered_transform(value.args[2])))
-                else
-                    _lm_error("ordered bodies admit local values, conditions, and bounded state assignments",
-                        source; actual=value)
-                end
-            end
-        end
-        parse_ordered_block(ordered_body)
-        isempty(writes) && _lm_error("@ordered requires a state assignment", source)
-        missing_targets = filter(target -> !haskey(writes, target), targets)
-        isempty(missing_targets) || _lm_error(
-            "@ordered must define every declared state component in one FoldStep",
-            source; actual=Tuple(missing_targets))
-        update_pairs = Pair{Symbol,Any}[]
-        for pair in state_pairs
-            target = first(pair)
-            expression = writes[target]
-            push!(update_pairs, target => expression)
-        end
-        transition = Expr(:->,
-            Expr(:tuple, state_symbol, gensym(:event), transition_item,
-                transition_reads),
-            Expr(:block, local_statements...,
-                :(return $(GlobalRef(LocalMath, :_authoring_fold_step))(
-                    $(_lm_namedtuple(update_pairs)), $(ordered_transform(halt))))))
-        key, identity = source_ordered ? (item_symbol, nothing) :
-            (transform(by.args[1]), transform(by.args[2]))
-        port = publication_port(nothing, :ordered_state)
-        push!(publications, _LocalMathPublicationSyntax(nothing, nothing,
-            port, :ordered_state,
-            source_ordered ? key : Expr(:tuple, key, identity),
-            (; state_pairs=Tuple(state_pairs), transition, by,
-                source_ordered), line))
-        return nothing
-    end
+    parse_state = (; publications, publication_port, evaluator_aliases,
+        evaluator_type_aliases)
     current_line = source.line
     for statement in body.args
         statement isa LineNumberNode && (current_line = statement.line; continue)
         statement isa Expr || (push!(evaluator_statements, statement); continue)
         if statement.head === :macrocall &&
                 statement.args[1] === Symbol("@ordered")
-            ordered_syntax(statement, current_line)
-        elseif _lm_call(statement, :publish)
-            positional, keywords = _lm_call_options(statement, source)
-            length(positional) == 2 || _lm_error(
-                "publish requires a destination Field and one value", source;
-                actual = statement)
-            field, value = positional
-            field isa Symbol || _lm_error(
-                "publish destination must be a simple Field binding", source;
-                actual = field)
-            all(haskey(keywords, key) for key in (:route, :key)) || _lm_error(
-                "runtime publish requires explicit route and key keywords",
-                source; actual = statement)
-            relation = keywords[:route]
-            relation isa Symbol || _lm_error(
-                "publish route must be a simple RuntimeRelation binding",
-                source; actual = relation)
-            law_value = get(keywords, :law, QuoteNode(:unique))
-            law = law_value isa QuoteNode ? law_value.value : law_value
-            law in (:unique, :reduce, :resolve) || _lm_error(
-                "runtime publish law must be :unique, :reduce, or :resolve",
-                source; actual = law)
-            allowed = law === :unique ?
-                (:route, :key, :law, :when, :maximum) :
-                law === :reduce ?
-                (:route, :key, :law, :when, :maximum, :op, :seed,
-                    :onempty, :order) :
-                    (:route, :key, :law, :when, :maximum, :score, :lower,
-                    :upper, :sense, :tie, :onempty)
-            _lm_require_keywords(keywords, allowed, :publish, source)
-            delete!(keywords, :route)
-            delete!(keywords, :law)
-            if law === :resolve
-                all(haskey(keywords, key) for key in (:score, :lower, :upper)) ||
-                    _lm_error("runtime Resolve requires score, lower, and upper",
-                        source; actual = statement)
-                keywords[:payload] = value
-                haskey(keywords, :tie) &&
-                    (keywords[:_tie_fields] = _lm_explicit_tie_fields(
-                        keywords[:tie], binder, source,
-                        evaluator_type_aliases))
-            end
-            port = publication_port(field, law)
-            transformed_options = (; (key => transform(val)
-                for (key, val) in keywords)...)
-            push!(publications, _LocalMathPublicationSyntax(field, relation,
-                port, law, transform(value), transformed_options, current_line))
-        elseif statement.head in (:(=), :(+=)) && statement.args[1] isa Expr &&
-                statement.args[1].head === :ref
-            lhs, rhs = statement.args
-            length(lhs.args) >= 2 || _lm_error(
-                "publication targets require a bounded index", source; actual = lhs)
-            field, indices = lhs.args[1], Tuple(lhs.args[2:end])
-            field isa Symbol || _lm_error(
-                "publication descriptors must be simple bindings", source;
-                actual = field)
-            relation = relation_index(indices, field)
-            relation === missing && _lm_error(
-                "a publication index must be the item or `relation(item)`",
-                source; actual = indices)
-            law, value, options = statement.head === :(+=) ?
-                (:reduce, rhs, NamedTuple()) : (:unique, rhs, NamedTuple())
-            if _lm_call(rhs, :reduce_to)
-                positional, keywords = _lm_call_options(rhs, source)
-                _lm_require_keywords(keywords,
-                    (:op, :seed, :order, :onempty, :when, :maximum),
-                    :reduce_to, source)
-                length(positional) == 1 || _lm_error(
-                    "reduce_to requires one contribution", source; actual = rhs)
-                law, value = :reduce, only(positional)
-                options = (; (key => val for (key, val) in keywords)...)
-            elseif _lm_call(rhs, :resolve_to)
-                positional, keywords = _lm_call_options(rhs, source)
-                _lm_require_keywords(keywords,
-                    (:score, :payload, :lower, :upper, :sense, :when,
-                        :maximum, :tie, :onempty), :resolve_to, source)
-                isempty(positional) || _lm_error(
-                    "resolve_to uses score and payload keywords", source; actual = rhs)
-                all(haskey(keywords, key) for key in (:score, :payload, :lower, :upper)) ||
-                    _lm_error("resolve_to requires score, payload, lower, and upper",
-                        source; actual = rhs)
-                haskey(keywords, :tie) &&
-                    (keywords[:_tie_fields] = _lm_explicit_tie_fields(
-                        keywords[:tie], binder, source,
-                        evaluator_type_aliases))
-                law, value = :resolve, nothing
-                options = (; (key => val for (key, val) in keywords)...)
-            elseif _lm_call(rhs, :bounded_collect)
-                positional, keywords = _lm_call_options(rhs, source)
-                _lm_require_keywords(keywords,
-                    (:maximum, :group, :groups, :overflow, :when,
-                        :order, :projection),
-                    :bounded_collect, source)
-                length(positional) == 1 || _lm_error(
-                    "bounded_collect requires one record", source; actual = rhs)
-                haskey(keywords, :maximum) || _lm_error(
-                    "bounded_collect requires a static maximum", source; actual = rhs)
-                overflow = _lm_literal_symbol(get(keywords, :overflow,
-                    QuoteNode(:reject)))
-                overflow === :reject || _lm_error(
-                    "bounded_collect currently supports only overflow=:reject",
-                    source; actual = overflow)
-                haskey(keywords, :group) == haskey(keywords, :groups) ||
-                    _lm_error("routed Collect requires both group and groups",
-                        source; actual = keys(keywords))
-                law, value = :collect, only(positional)
-                options = (; (key => val for (key, val) in keywords)...)
-            end
-            port = publication_port(field, law)
-            transformed_value = value === nothing ? nothing : transform(value)
-            transformed_options = (; (key => transform(val)
-                for (key, val) in pairs(options))...)
-            push!(publications, _LocalMathPublicationSyntax(field, relation,
-                port, law, transformed_value, transformed_options, current_line))
+            _lm_parse_ordered_state!(
+                statement, current_line, domain_syntax, access, parse_state, source)
+        elseif _lm_parse_publication!(
+                statement, current_line, domain_syntax, access, parse_state, source)
         elseif statement.head === :while
             _lm_error("@localmath does not admit unbounded while loops", source;
                 actual = statement)
@@ -734,6 +772,19 @@ function _lm_stage(spec, body::Expr, source; label = nothing)
     isempty(publications) && _lm_error(
         "an @localmath stage requires at least one publication equation", source)
 
+    return (; publications, evaluator_statements,
+        evaluator_type_aliases)
+end
+
+"""Emit hygienic typed LocalMath constructors from parsed authoring facts."""
+function _lm_emit_stage(
+        domain_syntax, declarations, access, parsed, source, label)
+    (; binder, source_expression, semantic_source_expression, stage_options,
+        cartesian, binder_symbols, source_mode, halo) = domain_syntax
+    (; reads, synthetic_relation_expressions, reads_symbol,
+        parameters_symbol, item_symbol) = access
+    (; publications, evaluator_statements, evaluator_type_aliases) = parsed
+    parameter_names = Tuple(declaration.args[1] for declaration in declarations)
     source_local, full_source_local, identity_local =
         gensym(:source), gensym(:full_source), gensym(:identity)
     field_reads = filter(read -> read isa _LocalMathReadSyntax, reads)
@@ -1096,12 +1147,23 @@ function _lm_stage(spec, body::Expr, source; label = nothing)
         :($(GlobalRef(LocalMath, :LocalLaw))($stage)))
 end
 
-function _lm_expand(args, source)
+"""Lower one authored stage directly to existing typed LocalMath values."""
+function _lm_lower_stage(spec, body::Expr, source; label = nothing)
+    domain_syntax = _lm_stage_domain(spec, source)
+    declarations = _lm_parameters(
+        domain_syntax.stage_options.parameters, source)
+    access = _lm_discover_stage_accesses(domain_syntax, source)
+    parsed = _lm_parse_stage_body(body, domain_syntax, access, source)
+    return _lm_emit_stage(
+        domain_syntax, declarations, access, parsed, source, label)
+end
+
+function _lm_lower(args, source)
     if length(args) == 2
         spec, body = args
         body isa Expr && body.head === :block ||
             _lm_error("@localmath requires a begin/end body", source; actual = body)
-        return _lm_stage(spec, body, source)
+        return _lm_lower_stage(spec, body, source)
     elseif length(args) == 1
         body = only(args)
         if body isa Expr && body.head === :function
@@ -1114,7 +1176,7 @@ function _lm_expand(args, source)
         body isa Expr && body.head === :block ||
             _lm_error("@localmath requires a binder or @stage block", source;
                 actual = body)
-        works = Any[]
+        laws = Any[]
         for statement in body.args
             statement isa LineNumberNode && continue
             statement isa Expr && statement.head === :macrocall &&
@@ -1129,11 +1191,11 @@ function _lm_expand(args, source)
             label = invocation.args[1]
             stage_spec = length(invocation.args) == 2 ? invocation.args[2] :
                 Expr(:tuple, invocation.args[2:end]...)
-            push!(works, _lm_stage(stage_spec, stage_body, source; label))
+            push!(laws, _lm_lower_stage(stage_spec, stage_body, source; label))
         end
-        isempty(works) && _lm_error("@localmath requires at least one @stage",
+        isempty(laws) && _lm_error("@localmath requires at least one @stage",
             source)
-        return :($(GlobalRef(LocalMath, :sequence))($(works...)))
+        return :($(GlobalRef(LocalMath, :sequence))($(laws...)))
     end
     _lm_error("@localmath accepts a function definition, one binder and body, or a stage block",
         source; actual = args)
@@ -1176,5 +1238,5 @@ interpretation. The macro creates no alternate executor or runtime syntax
 tree.
 """
 macro localmath(args...)
-    return esc(_lm_expand(args, __source__))
+    return esc(_lm_lower(args, __source__))
 end
