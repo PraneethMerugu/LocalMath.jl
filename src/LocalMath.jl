@@ -89,5 +89,6 @@ include("execution/collect_physical_support.jl")
 include("execution/collect_stage.jl")
 include("execution/stage_program_kernelabstractions.jl")
 include("execution/stage_program.jl")
+include("execution/program_inspection.jl")
 
 end

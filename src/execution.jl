@@ -395,7 +395,7 @@ function _observe_receipt_failure(receipt::ExecutionReceipt)
     error = _prepared_validation_error_at(
         receipt.prepared, receipt.lease_index)
     error === nothing && return nothing
-    return _with_work_source_origin(error,
+    return _with_law_source_origin(error,
         _plan_law(receipt.prepared.plan), :wait, error.contract)
 end
 

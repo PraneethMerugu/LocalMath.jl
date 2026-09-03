@@ -236,9 +236,9 @@ function _field_publication_requires_initialization(
     return !_publication_initializes_field(stage, publication, field)
 end
 
-function _require_definite_field_initialization(work::LocalLaw, field::Field)
+function _require_definite_field_initialization(law::LocalLaw, field::Field)
     initialized = false
-    for (index, stage) in enumerate(work.stages)
+    for (index, stage) in enumerate(law.stages)
         if !initialized && _field_used_at_stage_entry(stage, field)
             throw(LocalMathValidationError(
                 "an uninitialized allocated Field is read before a proven total assignment";
@@ -269,9 +269,9 @@ function _require_definite_field_initialization(work::LocalLaw, field::Field)
     return nothing
 end
 
-function _collect_allocation_schema(work::LocalLaw, collection::Collection)
+function _collect_allocation_schema(law::LocalLaw, collection::Collection)
     schemas = Any[]
-    for stage in work.stages, publication in stage.publications
+    for stage in law.stages, publication in stage.publications
         publication.law isa Collect || continue
         any(publication.components) do component
             component isa CollectionPublication &&
@@ -316,14 +316,14 @@ _zeroed_int32_storage(backend, length::Int) =
     _filled_int32_storage(backend, length, Int32(0))
 
 function _collection_allocation(
-        work::LocalLaw, collection::Collection, request::Allocate, backend,
+        law::LocalLaw, collection::Collection, request::Allocate, backend,
     )
     request.initial isa _EmptyAllocation || throw(LocalMathValidationError(
         "Collection allocation uses the zero-argument Allocate() form";
         stage = :bind, contract = :collection_allocation_initialization,
         expected = :empty_collection, actual = request.initial,
     ))
-    schema = _collect_allocation_schema(work, collection)
+    schema = _collect_allocation_schema(law, collection)
     capacity = Int(collection.capacity)
     records = _allocate_compacted_records(backend, eltype(collection), capacity)
     count = _zeroed_int32_storage(backend, 1)
@@ -454,15 +454,15 @@ function _declared_collection_binding(entry::Pair)
     return _collection_storage_binding(collection, storage)
 end
 
-function _materialized_field_declaration(work, entry::Pair, backend)
+function _materialized_field_declaration(law, entry::Pair, backend)
     field, declaration = entry
     if declaration isa Temporary
-        _require_definite_field_initialization(work, field)
+        _require_definite_field_initialization(law, field)
         return field => _TemporaryStorageRequest(backend)
     end
     declaration isa Allocate || return entry
     declaration.initial isa UndefInitializer &&
-        _require_definite_field_initialization(work, field)
+        _require_definite_field_initialization(law, field)
     return field => _field_allocation(field, declaration, backend)
 end
 
@@ -494,11 +494,11 @@ function _materialized_relation_declaration(entry::Pair, backend)
     return relation => materialized
 end
 
-function _materialized_collection_declaration(work, entry::Pair, backend)
+function _materialized_collection_declaration(law, entry::Pair, backend)
     collection, declaration = entry
     declaration isa Allocate || return entry
     return collection => _collection_allocation(
-        work, collection, declaration, backend)
+        law, collection, declaration, backend)
 end
 
 function _contains_allocation(declaration::Allocate)

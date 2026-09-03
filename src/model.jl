@@ -147,36 +147,36 @@ function LocalLaw(stage; parameters = nothing)
 end
 
 """
-    sequence(works::LocalLaw...)
+    sequence(laws::LocalLaw...)
 
 Concatenate scientific stages and merge their one cold schemas in first
 declaration order.  This is value composition only: it adds no scheduler,
 topology bundle, compatibility operation, or execution route.
 """
-function sequence(works::LocalLaw...)
-    isempty(works) && throw(LocalMathValidationError(
+function sequence(laws::LocalLaw...)
+    isempty(laws) && throw(LocalMathValidationError(
         "a LocalLaw sequence requires at least one program";
         stage = :construct, contract = :program_sequence,
     ))
-    stages = Tuple(stage for work in works for stage in work.stages)
+    stages = Tuple(stage for law in laws for stage in law.stages)
     parameters = _merge_parameter_schemas(Tuple(
-        work.parameters for work in works
+        law.parameters for law in laws
     ))
     return LocalLaw(stages, parameters)
 end
 
-sequence(works::Tuple{Vararg{LocalLaw}}) = sequence(works...)
+sequence(laws::Tuple{Vararg{LocalLaw}}) = sequence(laws...)
 
-function _work_source_origin(work::LocalLaw, stage::Union{Nothing, Int})
+function _law_source_origin(law::LocalLaw, stage::Union{Nothing, Int})
     stage === nothing && return _NO_SOURCE_ORIGIN
     index = stage
-    1 <= index <= length(work.stages) || return _NO_SOURCE_ORIGIN
-    return work.stages[index].origin
+    1 <= index <= length(law.stages) || return _NO_SOURCE_ORIGIN
+    return law.stages[index].origin
 end
 
-function _with_work_source_origin(
+function _with_law_source_origin(
         error,
-        work::LocalLaw,
+        law::LocalLaw,
         lifecycle::Symbol,
         contract::Symbol;
         stage::Union{Nothing, Int} = nothing,
@@ -184,7 +184,7 @@ function _with_work_source_origin(
     stage_index = stage === nothing ? _validation_stage_index(error) : stage
     return _with_source_origin(
         error,
-        _work_source_origin(work, stage_index),
+        _law_source_origin(law, stage_index),
         lifecycle,
         contract,
     )

@@ -199,7 +199,8 @@ end
 _lm_namedtuple(pairs) = Expr(:tuple, Expr(:parameters,
     (Expr(:kw, name, value) for (name, value) in pairs)...))
 
-function _lm_stage(spec, body::Expr, source; label = nothing)
+"""Parse the stage binder and its Cartesian boundary contract at macro time."""
+function _lm_stage_domain(spec, source)
     binder, source_expression, stage_options =
         _lm_binder(spec, source)
     tuple_binder = binder isa Expr && binder.head === :tuple
@@ -230,6 +231,21 @@ function _lm_stage(spec, body::Expr, source; label = nothing)
         source_mode !== :plain &&
             (semantic_source_expression = source_expression.args[2])
     end
+    return (; binder, source_expression, semantic_source_expression,
+        stage_options, cartesian, binder_symbols, source_mode, halo)
+end
+
+"""Lower one authored stage directly to existing typed LocalMath values."""
+function _lm_lower_stage(spec, body::Expr, source; label = nothing)
+    domain_syntax = _lm_stage_domain(spec, source)
+    binder = domain_syntax.binder
+    source_expression = domain_syntax.source_expression
+    semantic_source_expression = domain_syntax.semantic_source_expression
+    stage_options = domain_syntax.stage_options
+    cartesian = domain_syntax.cartesian
+    binder_symbols = domain_syntax.binder_symbols
+    source_mode = domain_syntax.source_mode
+    halo = domain_syntax.halo
     parameter_expression = stage_options.parameters
     declarations = _lm_parameters(parameter_expression, source)
     parameter_names = Tuple(declaration.args[1] for declaration in declarations)
@@ -1096,12 +1112,12 @@ function _lm_stage(spec, body::Expr, source; label = nothing)
         :($(GlobalRef(LocalMath, :LocalLaw))($stage)))
 end
 
-function _lm_expand(args, source)
+function _lm_lower(args, source)
     if length(args) == 2
         spec, body = args
         body isa Expr && body.head === :block ||
             _lm_error("@localmath requires a begin/end body", source; actual = body)
-        return _lm_stage(spec, body, source)
+        return _lm_lower_stage(spec, body, source)
     elseif length(args) == 1
         body = only(args)
         if body isa Expr && body.head === :function
@@ -1129,7 +1145,7 @@ function _lm_expand(args, source)
             label = invocation.args[1]
             stage_spec = length(invocation.args) == 2 ? invocation.args[2] :
                 Expr(:tuple, invocation.args[2:end]...)
-            push!(works, _lm_stage(stage_spec, stage_body, source; label))
+            push!(works, _lm_lower_stage(stage_spec, stage_body, source; label))
         end
         isempty(works) && _lm_error("@localmath requires at least one @stage",
             source)
@@ -1176,5 +1192,5 @@ interpretation. The macro creates no alternate executor or runtime syntax
 tree.
 """
 macro localmath(args...)
-    return esc(_lm_expand(args, __source__))
+    return esc(_lm_lower(args, __source__))
 end
