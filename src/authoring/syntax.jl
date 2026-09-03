@@ -1130,7 +1130,7 @@ function _lm_lower(args, source)
         body isa Expr && body.head === :block ||
             _lm_error("@localmath requires a binder or @stage block", source;
                 actual = body)
-        works = Any[]
+        laws = Any[]
         for statement in body.args
             statement isa LineNumberNode && continue
             statement isa Expr && statement.head === :macrocall &&
@@ -1145,11 +1145,11 @@ function _lm_lower(args, source)
             label = invocation.args[1]
             stage_spec = length(invocation.args) == 2 ? invocation.args[2] :
                 Expr(:tuple, invocation.args[2:end]...)
-            push!(works, _lm_lower_stage(stage_spec, stage_body, source; label))
+            push!(laws, _lm_lower_stage(stage_spec, stage_body, source; label))
         end
-        isempty(works) && _lm_error("@localmath requires at least one @stage",
+        isempty(laws) && _lm_error("@localmath requires at least one @stage",
             source)
-        return :($(GlobalRef(LocalMath, :sequence))($(works...)))
+        return :($(GlobalRef(LocalMath, :sequence))($(laws...)))
     end
     _lm_error("@localmath accepts a function definition, one binder and body, or a stage block",
         source; actual = args)
