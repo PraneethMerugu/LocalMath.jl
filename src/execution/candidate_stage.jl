@@ -689,18 +689,20 @@ end
         if item <= stage.source_count && prefix_valid
             _, active = _stage_control_state(
                 stage, qualified.parameters, item)
-            access_valid = _stage_accesses_valid(
-                stage.accesses, stage.fields, item)
-            access_valid || _candidate_fail!(
-                diagnostics, _CANDIDATE_FAILURE_RELATION)
-            if active && access_valid
-                result = _call_stage_evaluator(qualified, item,
-                    _stage_reads(stage, item,
-                        _CandidateEvaluationValidation(diagnostics)),
-                    qualified.parameters)
-                _claim_publications!(
-                    publications, workspaces,
-                    result, stage.fields, item, 1, diagnostics)
+            if active
+                access_valid = _stage_accesses_valid(
+                    stage.accesses, stage.fields, item)
+                access_valid || _candidate_fail!(
+                    diagnostics, _CANDIDATE_FAILURE_RELATION)
+                if access_valid
+                    result = _call_stage_evaluator(qualified, item,
+                        _stage_reads(stage, item,
+                            _CandidateEvaluationValidation(diagnostics)),
+                        qualified.parameters)
+                    _claim_publications!(
+                        publications, workspaces,
+                        result, stage.fields, item, 1, diagnostics)
+                end
             end
         end
     end

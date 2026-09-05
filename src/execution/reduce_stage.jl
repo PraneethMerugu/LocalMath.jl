@@ -455,8 +455,11 @@ function _candidate_workspace_from_tree(tree, spec,
 end
 
 function _require_reduce_value_capabilities(backend, ::Type{T}) where {T}
-    all(operation -> _centrally_qualified_value_capability(
-        backend, T, operation, :global), (:load, :store)) || throw(
+    all((:load, :store)) do operation
+        _centrally_qualified_value_capability(
+            backend, T, operation, :global) ||
+            _centrally_qualified_stage_record(backend, T, operation)
+    end || throw(
         LocalMathValidationError(
             "the backend lacks the reviewed Reduce value capability";
             stage = :prepare, contract = :reduce_backend_capability,

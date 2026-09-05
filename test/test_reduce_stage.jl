@@ -20,6 +20,17 @@ struct MixedConflictEvaluator end
     unique = LMR.UniqueValue(item),
     reduction = LMR.Contribution(item),
 )
+struct RecordContributionValue
+    unsigned::UInt32
+    signed::Int32
+end
+struct RecordContribution end
+@inline (::RecordContribution)(item::Int32, reads, parameters) =
+    (value = LMR.Contribution(RecordContributionValue(
+        UInt32(item), -item)),)
+@inline _combine_record_contributions(left::RecordContributionValue,
+    right::RecordContributionValue) = RecordContributionValue(
+        left.unsigned + right.unsigned, left.signed + right.signed)
 
 function _reduce_test_stage(source, output, relation, law, evaluator;
         role = :value, control = LMR.Control())
@@ -45,6 +56,26 @@ function _run_test_candidate!(prepared)
         error isa LMR.LocalMathValidationError || rethrow()
     end
     return only(prepared.runtime.launches).stage
+end
+
+@testset "canonical Reduce admits reviewed isbits record storage" begin
+    source = LMR.Space(ReduceStageNode, 3)
+    destination = LMR.Space(ReduceStageNode, 1)
+    output = LMR.Field(destination, RecordContributionValue)
+    relation = LMR.FixedRelation(source => destination; degree = 1)
+    seed = RecordContributionValue(UInt32(0), Int32(0))
+    law = LMR.Reduce(RecordContributionValue, _combine_record_contributions;
+        seed = LMR.IdentitySeed(seed), order = LMR.CanonicalLeftFold())
+    stage = _reduce_test_stage(
+        source, output, relation, law, RecordContribution())
+    storage = fill(seed, 1)
+    endpoints = reshape(fill(Int32(1), 3), 1, 3)
+    bound = LMR._bind_law(LMR.LocalLaw(stage), LMR._StructuralBinding(
+        (LMR._field_storage_binding(output, storage),),
+        (LMR._relation_storage_binding(relation, (
+            endpoints, counts = fill(Int32(1), 3))),)))
+    _run_test_candidate!(_prepare_test_candidate(bound))
+    @test storage == [RecordContributionValue(UInt32(6), Int32(-6))]
 end
 
 @testset "canonical Reduce is the exact item-major lane-minor left fold" begin
