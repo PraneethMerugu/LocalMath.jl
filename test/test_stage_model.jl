@@ -280,6 +280,8 @@ struct SMForeignBounds <: LMM._ParameterBounds end
     # cannot hide in an otherwise empty/isbits callable.
     symbol_identity = SMHostileParameterEvaluator{:label}()
     @test LMM.Evaluator(symbol_identity).evaluator === symbol_identity
+    absent_identity = SMHostileParameterEvaluator{nothing}()
+    @test LMM.Evaluator(absent_identity).evaluator === absent_identity
     for hostile in (
             SMHostileParameterEvaluator{LMM.UUIDs.uuid4()}(),
             SMHostileParameterEvaluator{Val{1}}(),

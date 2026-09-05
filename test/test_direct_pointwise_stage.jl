@@ -304,6 +304,31 @@ end
     @test LMDP._logical_lowering_entries(
         strict_plan.lowering)[1].executor.layout isa
         LMDP._GroupedCandidateLayout
+
+    prefix = LMDP.Parameter(:prefix, Int32; bounds = (Int32(0), Int32(3)))
+    partial = LMDP.Publication((LMDP.FieldPublication(
+        output, identity, LMDP.PublicationValue(:value)),),
+        LMDP.Unique(Int32; coverage = LMDP.PartialCoverage(),
+            onempty = LMDP.PreserveEmpty()))
+    prefixed_law = LMDP.LocalLaw(LMDP.Stage(
+        source, (values = LMDP.Access(values, strict; required = false),),
+        (partial,), LMDP.Evaluator(OptionalIndexEvaluator()),
+        LMDP.Control(; prefix),
+        LMDP.SourceOrigin(:direct_pointwise_inactive_relation, 1));
+        parameters = LMDP.ParameterSchema(prefix))
+    prefixed_storage = fill(Int32(-1), 3)
+    prefixed_bound = _direct_pointwise_bound(prefixed_law, (
+        keys => Int32[2, 0, 0],
+        values => Int32[10, 20, 30],
+        output => prefixed_storage,
+    ), (identity, strict))
+    prefixed_plan = LMDP.plan(prefixed_bound; backend)
+    @test LMDP._logical_lowering_entries(
+        prefixed_plan.lowering)[1].executor.layout isa
+        LMDP._GroupedCandidateLayout
+    wait(LMDP.execute!(
+        LMDP.prepare(prefixed_plan); parameters = (prefix = Int32(1),)))
+    @test prefixed_storage == Int32[20, -1, -1]
 end
 
 @testset "pointwise lowering rejects off-item destination reads" begin

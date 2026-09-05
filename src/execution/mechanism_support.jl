@@ -138,8 +138,8 @@ function _centrally_qualified_resolved_record(backend, type::Type)
     return qualified && offset == sizeof(type)
 end
 
-const _WIDE_RESOLVED_RECORD_MAX_FIELDS = 12
-const _WIDE_RESOLVED_RECORD_MAX_BYTES = 48
+const _WIDE_RESOLVED_RECORD_MAX_FIELDS = 16
+const _WIDE_RESOLVED_RECORD_MAX_BYTES = 64
 const _WIDE_RESOLVED_RECORD_MAX_ALIGNMENT = 8
 
 _requires_wide_component_record(type::Type) = fieldcount(type) > 8 ||

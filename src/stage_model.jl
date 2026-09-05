@@ -61,6 +61,7 @@ function _device_type_parameter(parameter)
     # `_device_evaluator_capture`, and the closed-callable effect analysis is
     # still the final authority over the method body.
     parameter isa Symbol && return true
+    parameter === nothing && return true
     parameter isa Union{UUIDs.UUID,Val,Ptr,Ref,NamedTuple} && return false
     parameter isa Bool && return true
     parameter isa Enum && return true

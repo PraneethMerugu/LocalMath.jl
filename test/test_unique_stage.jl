@@ -169,6 +169,21 @@ end
     ))
     _run_test_unique!(_prepare_test_unique(bound))
     @test collect(storage) == fill(record, 2)
+
+    lane_record = ntuple(Int32, 16)
+    lane_output = LMU.Field(destination, typeof(lane_record))
+    lane_stage = _unique_test_stage(source, lane_output, relation,
+        LMU.Unique(typeof(lane_record)), UniqueConstantEvaluator(lane_record))
+    lane_storage = LMU.StructArrays.StructArray(fill(lane_record, 2))
+    lane_bound = LMU._bind_law(LMU.LocalLaw(lane_stage), LMU._StructuralBinding(
+        (LMU._field_storage_binding(lane_output, lane_storage),),
+        (LMU._relation_storage_binding(relation, (
+            endpoints = reshape(Int32[1, 2], 1, 2),
+            counts = Int32[1, 1],
+        )),),
+    ))
+    _run_test_unique!(_prepare_test_unique(lane_bound))
+    @test collect(lane_storage) == fill(lane_record, 2)
 end
 
 @testset "static relation borrowing and dynamic relation validation" begin
