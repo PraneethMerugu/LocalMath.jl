@@ -19,6 +19,36 @@ struct _PersistentSourcePosition end
 
 const _COMPACTED_MAX_ORDINAL = Int32(typemax(Int32) - 1)
 
+@kernel function _initialize_allocated_storage_kernel!(destination, value)
+    index = @index(Global, Linear)
+    index <= length(destination) && (@inbounds destination[index] = value)
+end
+
+function _allocate_array(backend, ::Type{T}, shape::Tuple) where {T}
+    return KernelAbstractions.allocate(backend, T, shape)
+end
+
+function _initialize_allocated_storage!(backend, destination, value)
+    isempty(destination) && return destination
+    kernel = _initialize_allocated_storage_kernel!(backend)
+    kernel(destination, value; ndrange = length(destination))
+    KernelAbstractions.synchronize(backend)
+    return destination
+end
+
+function _filled_int32_storage(backend, length::Int, value::Int32)
+    storage = _allocate_array(backend, Int32, (length,))
+    return _initialize_allocated_storage!(backend, storage, value)
+end
+
+function _filled_uint64_storage(backend, length::Int, value::UInt64)
+    storage = _allocate_array(backend, UInt64, (length,))
+    return _initialize_allocated_storage!(backend, storage, value)
+end
+
+_zeroed_int32_storage(backend, length::Int) =
+    _filled_int32_storage(backend, length, Int32(0))
+
 """
     BoundedGroupView{K,T}
 
@@ -108,6 +138,12 @@ either `nothing` or a device `Int32[G+1]` directory, and `source_item` plus
 `source_lane` retain provenance. `source_position` is present only when a
 typed downstream request demands that projection. This value is not an
 `AbstractArray`; its inactive record tail has no value semantics.
+
+`CompactedStorage(backend, T, capacity; group_count=nothing,
+source_items=capacity, source_position=false)` constructs a logically empty
+store. The count and provenance arrays start at zero and a grouped directory
+starts at one. Construction is a cold, synchronized storage operation; no
+initialization work survives into planning or execution.
 """
 struct CompactedStorage{R, C, S, I, L, P}
     records::R
@@ -218,13 +254,13 @@ function CompactedStorage(
     group_count === nothing || (group_count isa Integer && !(group_count isa Bool) &&
         group_count >= 0) || throw(ArgumentError(
         "group_count must be a nonnegative integer or nothing"))
-    count = KernelAbstractions.allocate(backend, Int32, (1,))
+    count = _zeroed_int32_storage(backend, 1)
     segments = group_count === nothing ? nothing :
-        KernelAbstractions.allocate(backend, Int32, (Int(group_count) + 1,))
-    source_item = KernelAbstractions.allocate(backend, Int32, (Int(capacity),))
-    source_lane = KernelAbstractions.allocate(backend, Int32, (Int(capacity),))
+        _filled_int32_storage(backend, Int(group_count) + 1, Int32(1))
+    source_item = _zeroed_int32_storage(backend, Int(capacity))
+    source_lane = _zeroed_int32_storage(backend, Int(capacity))
     projection = source_position ?
-        KernelAbstractions.allocate(backend, Int32, (Int(source_items),)) : nothing
+        _zeroed_int32_storage(backend, Int(source_items)) : nothing
     return CompactedStorage(_CONSTRUCTION_TOKEN,
         _allocate_compacted_records(backend, T, Int(capacity)), count, segments,
         source_item, source_lane, projection)

@@ -75,23 +75,6 @@ function MutableRelationStorage(storage; generation, status = nothing,
         validated_generations, Int(slot))
 end
 
-@kernel function _initialize_allocated_storage_kernel!(destination, value)
-    index = @index(Global, Linear)
-    index <= length(destination) && (@inbounds destination[index] = value)
-end
-
-function _allocate_array(backend, ::Type{T}, shape::Tuple) where {T}
-    return KernelAbstractions.allocate(backend, T, shape)
-end
-
-function _initialize_allocated_storage!(backend, destination, value)
-    isempty(destination) && return destination
-    kernel = _initialize_allocated_storage_kernel!(backend)
-    kernel(destination, value; ndrange = length(destination))
-    KernelAbstractions.synchronize(backend)
-    return destination
-end
-
 function _copy_allocated_array(backend, source::AbstractArray)
     destination = _allocate_array(backend, eltype(source), size(source))
     copyto!(destination, source)
@@ -302,19 +285,6 @@ function _collect_allocation_schema(law::LocalLaw, collection::Collection)
     return first(schemas)
 end
 
-function _filled_int32_storage(backend, length::Int, value::Int32)
-    storage = _allocate_array(backend, Int32, (length,))
-    return _initialize_allocated_storage!(backend, storage, value)
-end
-
-function _filled_uint64_storage(backend, length::Int, value::UInt64)
-    storage = _allocate_array(backend, UInt64, (length,))
-    return _initialize_allocated_storage!(backend, storage, value)
-end
-
-_zeroed_int32_storage(backend, length::Int) =
-    _filled_int32_storage(backend, length, Int32(0))
-
 function _collection_allocation(
         law::LocalLaw, collection::Collection, request::Allocate, backend,
     )
@@ -325,17 +295,14 @@ function _collection_allocation(
     ))
     schema = _collect_allocation_schema(law, collection)
     capacity = Int(collection.capacity)
-    records = _allocate_compacted_records(backend, eltype(collection), capacity)
-    count = _zeroed_int32_storage(backend, 1)
-    segment_starts = schema.grouped ? (
-        _filled_int32_storage(backend, schema.groups + 1, Int32(1))
-    ) : nothing
-    source_item = _zeroed_int32_storage(backend, capacity)
-    source_lane = _zeroed_int32_storage(backend, capacity)
-    source_position = schema.persistent_source_positions ?
-        _zeroed_int32_storage(backend, schema.source_position_count) : nothing
-    return CompactedStorage(_CONSTRUCTION_TOKEN, records, count,
-        segment_starts, source_item, source_lane, source_position)
+    return CompactedStorage(
+        backend,
+        eltype(collection),
+        capacity;
+        group_count = schema.grouped ? schema.groups : nothing,
+        source_items = schema.source_position_count,
+        source_position = schema.persistent_source_positions,
+    )
 end
 
 function _append_fold_state_requirements!(fields, law::OrderedFold)

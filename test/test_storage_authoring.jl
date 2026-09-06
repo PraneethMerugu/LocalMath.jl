@@ -287,7 +287,19 @@ end
     @test size(collection_storage.count) == (1,)
     @test size(collection_storage.segment_starts) == (3,)
     @test collection_storage.segment_starts == ones(Int32, 3)
+    @test collection_storage.count == Int32[0]
+    @test collection_storage.source_item == zeros(Int32, 3)
+    @test collection_storage.source_lane == zeros(Int32, 3)
     @test collection_storage.source_position === nothing
+    direct_collection_storage = LMA.CompactedStorage(
+        backend, Int32, 3; group_count = 2)
+    @test direct_collection_storage.count == collection_storage.count
+    @test direct_collection_storage.segment_starts ==
+        collection_storage.segment_starts
+    @test direct_collection_storage.source_item ==
+        collection_storage.source_item
+    @test direct_collection_storage.source_lane ==
+        collection_storage.source_lane
     prepared_collection = LMA.prepare(
         LMA.plan(collection_bound; backend))
     wait(LMA.execute!(prepared_collection))
