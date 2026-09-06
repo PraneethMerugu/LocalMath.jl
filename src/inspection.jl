@@ -138,7 +138,15 @@ function _show_space_summary(io::IO, space::Space; identity::Bool = true)
     print(io, "Space(extent=")
     show(io, size(space))
     kind = space_kind(space)
-    kind === _IndexSpaceKind || print(io, ", kind=", nameof(kind))
+    if kind === _ProductSpaceKind
+        factors = _space_factors(space)
+        print(io, ", kind=:product, factor_extents=")
+        show(io, map(size, factors))
+        print(io, ", factor_ids=")
+        show(io, map(_short_semantic_identity, factors))
+    elseif kind !== _IndexSpaceKind
+        print(io, ", kind=", nameof(kind))
+    end
     identity && print(io, ", id=", _short_semantic_identity(space))
     print(io, ")")
 end
