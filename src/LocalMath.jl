@@ -39,7 +39,7 @@ public ArgMin, ArgMax, CanonicalSourceLaneTie, TieMin, TieMax
 public RejectOverflow, EmptyCollection
 public FoldComponent, InitializedState, BoundedWrites, FoldStep
 public initialized_state
-public BoundedFold, fold, Where
+public BoundedFold, fold, geometric_mean, Where
 public RejectInvalid, SkipInvalid, FillInvalid, RejectEmpty
 public RelaxedAssociative
 public BoundedFoldOutcome, evaluate_bounded
@@ -51,6 +51,7 @@ import Adapt
 import Atomix
 import KernelAbstractions
 import StaticArrays
+import Statistics
 import StructArrays
 import UUIDs
 using KernelAbstractions: @index, @kernel, @localmem, @synchronize
@@ -77,6 +78,7 @@ include("stage_planning.jl")
 include("execution/relation_preparation.jl")
 include("execution/stage_preparation.jl")
 include("execution/bounded_fold_support.jl")
+include("bounded_reductions.jl")
 include("execution/workspace_support.jl")
 include("execution/candidate_grouping.jl")
 include("execution/candidate_stage.jl")

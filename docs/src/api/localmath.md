@@ -121,6 +121,24 @@ closes the map, accumulator, and result types before planning.
 second executor; the canonical implementation remains valid. Bounded scalar
 folding is distinct from the `OrderedFold` publication law for evolving state.
 
+Common reductions use ordinary Julia vocabulary on those same bounded views:
+
+```julia
+total = sum(values)
+smallest = minimum(values)
+largest = maximum(values)
+average = Statistics.mean(values)
+geometric = LocalMath.geometric_mean(values)
+```
+
+Canonical relation or Collection order is retained and repeated endpoints
+participate repeatedly. Absent lanes do not participate. `sum` returns the
+typed additive identity on empty input; `minimum` and `maximum` reject an empty
+transaction; `Statistics.mean` returns the ordinary correctly typed `NaN` for
+empty input. Present `NaN`, infinity, and signed zero follow Julia's ordinary
+numeric operations. `LocalMath.geometric_mean` accepts concrete floating-point
+values and rejects empty input or a nonpositive present value.
+
 ## Inspection
 
 `LocalMath.inspect` is qualified because it is tooling rather than ordinary
