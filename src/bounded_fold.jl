@@ -1,15 +1,20 @@
 """A concrete predicate describing the admitted value domain of a bounded fold."""
 struct Where{P}
     predicate::P
-    function Where(predicate::P) where {P}
+    function Where(::_ConstructionToken, predicate::P) where {P}
+        new{P}(predicate)
+    end
+end
+function Where(predicate::P) where {P}
         _bounded_fold_callable(predicate) || throw(LocalMathValidationError(
             "Where requires one concrete device-admissible predicate";
             stage = :construct, contract = :bounded_fold_domain,
             actual = P,
         ))
-        new{P}(predicate)
-    end
+    return Where(_CONSTRUCTION_TOKEN, predicate)
 end
+
+struct _AllBoundedValues end
 
 function _bounded_fold_callable(value)
     _device_law_callable(value) && return true
@@ -42,7 +47,7 @@ const _BOUNDED_FOLD_VALID = UInt8(0)
 const _BOUNDED_FOLD_INVALID_VALUE = UInt8(1)
 const _BOUNDED_FOLD_EMPTY = UInt8(2)
 
-"""Immutable bounded fold law returned by `bounded_fold`."""
+"""Precise immutable compiler law for one checked bounded scalar fold."""
 struct BoundedFold{M,C,S,F,D,I,E,O}
     map::M
     combine::C
@@ -52,12 +57,27 @@ struct BoundedFold{M,C,S,F,D,I,E,O}
     oninvalid::I
     onempty::E
     order::O
+    function BoundedFold(
+            ::_ConstructionToken,
+            map::M,
+            combine::C,
+            seed::S,
+            finish::F,
+            domain::D,
+            oninvalid::I,
+            onempty::E,
+            order::O,
+        ) where {M,C,S,F,D,I,E,O}
+        return new{M,C,S,F,D,I,E,O}(
+            map, combine, seed, finish, domain, oninvalid, onempty, order)
+    end
 end
 
 _device_type_parameter(::Type{<:BoundedFold}) = true
 
 _device_evaluator_capture(domain::Where) =
     _bounded_fold_callable(domain.predicate)
+_device_evaluator_capture(::_AllBoundedValues) = true
 _device_evaluator_capture(policy::FillInvalid) =
     _device_evaluator_capture(policy.value)
 _device_evaluator_capture(fold::BoundedFold) =
@@ -79,53 +99,180 @@ function _contains_bounded_fold_type(::Type{T}, seen = IdSet{Any}()) where {T}
         fieldtypes(T))
 end
 
-"""
-    bounded_fold(map, combine, seed, finish;
-                 domain, oninvalid=RejectInvalid(),
-                 onempty=RejectEmpty(), order=CanonicalLeftFold())
+function _validate_bounded_fold_types(
+        ::Type{T}, map, combine, seed, finish, oninvalid, onempty,
+    ) where {T}
+    isconcretetype(T) && isbitstype(T) || throw(LocalMathValidationError(
+        "BoundedFold requires one concrete isbits input type";
+        stage = :construct, contract = :bounded_fold_input_type,
+        expected = :concrete_isbits, actual = T,
+    ))
+    mapped = Core.Compiler.return_type(map, Tuple{T})
+    mapped isa DataType && isconcretetype(mapped) && isbitstype(mapped) ||
+        throw(LocalMathValidationError(
+            "BoundedFold map must infer one concrete isbits result";
+            stage = :construct, contract = :bounded_fold_map_type,
+            expected = :concrete_isbits, actual = mapped,
+        ))
+    accumulator = typeof(seed)
+    combined = Core.Compiler.return_type(combine, Tuple{accumulator,mapped})
+    combined === accumulator || throw(LocalMathValidationError(
+        "BoundedFold combine must preserve the accumulator type";
+        stage = :construct, contract = :bounded_fold_accumulator_type,
+        expected = accumulator, actual = combined,
+    ))
+    result = Core.Compiler.return_type(finish, Tuple{accumulator,Int32})
+    result isa DataType && isconcretetype(result) && isbitstype(result) ||
+        throw(LocalMathValidationError(
+            "BoundedFold finish must infer one concrete isbits result";
+            stage = :construct, contract = :bounded_fold_result_type,
+            expected = :concrete_isbits, actual = result,
+        ))
+    oninvalid isa FillInvalid && typeof(oninvalid.value) !== T && throw(
+        LocalMathValidationError(
+            "BoundedFold invalid fill must exactly match the input type";
+            stage = :construct, contract = :bounded_fold_invalid_fill_type,
+            expected = T, actual = typeof(oninvalid.value),
+        ))
+    onempty isa FillEmpty && typeof(onempty.value) !== result && throw(
+        LocalMathValidationError(
+            "BoundedFold empty fill must exactly match the result type";
+            stage = :construct, contract = :bounded_fold_empty_fill_type,
+            expected = result, actual = typeof(onempty.value),
+        ))
+    return result
+end
 
-Construct a concrete immutable fold over a bounded relation gather or bounded
-collection group. Absent lanes do not participate. Invalid and empty policies
-are explicit, and rejection is reported through the containing stage's
-transaction barrier.
+function _bounded_fold(
+        map, combine, seed, finish, domain, oninvalid, onempty, order,
+    )
+    return BoundedFold(_CONSTRUCTION_TOKEN, map, combine, seed, finish,
+        domain, oninvalid, onempty, order)
+end
+
 """
-function bounded_fold(map, combine, seed, finish;
-        domain,
+    BoundedFold(T, map, combine, init, finish;
+                domain=Where(...), oninvalid=RejectInvalid(),
+                onempty=RejectEmpty(), order=CanonicalLeftFold())
+
+Construct the precise compiler law for a bounded input with element type `T`.
+The map, accumulator, and result types are closed during construction. Ordinary
+mathematical code uses [`LocalMath.fold`](@ref) with the bounded values first.
+"""
+function BoundedFold(::Type{T}, map, combine, seed, finish;
+        domain = _AllBoundedValues(),
         oninvalid = RejectInvalid(),
         onempty = RejectEmpty(),
         order = CanonicalLeftFold(),
-    )
-    domain isa Where || throw(LocalMathValidationError(
-        "bounded_fold requires an explicit Where value domain";
+    ) where {T}
+    domain isa Union{Where,_AllBoundedValues} || throw(LocalMathValidationError(
+        "BoundedFold requires Where(predicate) or the default complete domain";
         stage = :construct, contract = :bounded_fold_domain,
-        expected = Where, actual = typeof(domain),
+        expected = (Where, :all), actual = typeof(domain),
     ))
     oninvalid isa Union{RejectInvalid,SkipInvalid,FillInvalid} || throw(
         LocalMathValidationError(
-            "bounded_fold has an unsupported invalid-value policy";
+            "BoundedFold has an unsupported invalid-value policy";
             stage = :construct, contract = :bounded_fold_invalid_policy,
             actual = typeof(oninvalid),
         ))
     onempty isa Union{RejectEmpty,FillEmpty} || throw(LocalMathValidationError(
-        "bounded_fold has an unsupported empty policy";
+        "BoundedFold has an unsupported empty policy";
         stage = :construct, contract = :bounded_fold_empty_policy,
         actual = typeof(onempty),
     ))
     order isa Union{CanonicalLeftFold,RelaxedAssociative} || throw(
         LocalMathValidationError(
-            "bounded_fold requires canonical or relaxed-associative order";
+            "BoundedFold requires canonical or relaxed-associative order";
             stage = :construct, contract = :bounded_fold_order,
             actual = typeof(order),
         ))
     for (callable, contract) in ((map, :bounded_fold_map),
             (combine, :bounded_fold_combine), (finish, :bounded_fold_finish))
         _bounded_fold_callable(callable) || throw(LocalMathValidationError(
-            "bounded_fold callables must be concrete and device-admissible";
+            "BoundedFold callables must be concrete and device-admissible";
             stage = :construct, contract, actual = typeof(callable),
         ))
     end
-    return BoundedFold(map, combine, seed, finish, domain, oninvalid,
-        onempty, order)
+    _validate_bounded_fold_types(
+        T, map, combine, seed, finish, oninvalid, onempty)
+    return _bounded_fold(
+        map, combine, seed, finish, domain, oninvalid, onempty, order)
+end
+
+@inline _bounded_fold_finish_identity(accumulator, ::Int32) = accumulator
+
+@inline function _fold_domain(domain::Symbol)
+    domain === :all && return _AllBoundedValues()
+    throw(LocalMathValidationError(
+        "fold domain must be :all or one concrete callable";
+        stage = :construct, contract = :bounded_fold_domain,
+        expected = (:all, :callable), actual = domain,
+    ))
+end
+@inline _fold_domain(predicate) = Where(_CONSTRUCTION_TOKEN, predicate)
+
+@inline function _fold_invalid(policy::Symbol)
+    policy === :reject && return RejectInvalid()
+    policy === :skip && return SkipInvalid()
+    throw(LocalMathValidationError(
+        "fold invalid policy must be :reject, :skip, or an exact fill value";
+        stage = :construct, contract = :bounded_fold_invalid_policy,
+        actual = policy,
+    ))
+end
+@inline _fold_invalid(value) = FillInvalid(value)
+
+@inline function _fold_empty(policy::Symbol)
+    policy === :reject && return RejectEmpty()
+    throw(LocalMathValidationError(
+        "fold empty policy must be :reject or an exact result fill";
+        stage = :construct, contract = :bounded_fold_empty_policy,
+        actual = policy,
+    ))
+end
+@inline _fold_empty(value) = FillEmpty(value)
+
+@inline function _fold_order(order::Symbol)
+    order === :canonical && return CanonicalLeftFold()
+    order === :relaxed && return RelaxedAssociative()
+    throw(LocalMathValidationError(
+        "fold order must be :canonical or :relaxed";
+        stage = :construct, contract = :bounded_fold_order,
+        actual = order,
+    ))
+end
+
+"""
+    LocalMath.fold(values; map=identity, combine, init,
+                   finish=(accumulator, count) -> accumulator,
+                   domain=:all, invalid=:reject, empty=:reject,
+                   order=:canonical)
+
+Fold one bounded relation gather or collection group in canonical lane order.
+Absent lanes do not participate and repeated endpoints participate repeatedly.
+Invalid and empty policies are explicit; rejection fails the containing
+transaction through its existing validation barrier.
+"""
+@inline function fold(
+        values;
+        map = identity,
+        combine,
+        init,
+        finish = _bounded_fold_finish_identity,
+        domain = :all,
+        invalid = :reject,
+        empty = :reject,
+        order = :canonical,
+    )
+    domain_policy = _fold_domain(domain)
+    invalid_policy = _fold_invalid(invalid)
+    empty_policy = _fold_empty(empty)
+    order_policy = _fold_order(order)
+    operation = _bounded_fold(
+        map, combine, init, finish, domain_policy, invalid_policy,
+        empty_policy, order_policy)
+    return operation(values)
 end
 
 """
@@ -162,7 +309,7 @@ end
         sample = _bounded_evaluation_sample(source, index)
         sample.present || continue
         value = _bounded_sample_value(sample)
-        if !fold.domain.predicate(value)
+        if !_bounded_fold_domain_admits(fold.domain, value)
             policy = fold.oninvalid
             if policy isa SkipInvalid
                 continue
@@ -201,6 +348,10 @@ end
     fold, count, _BoundedSampleSlice(input, Int32(first)))
 
 @inline _bounded_sample_value(sample) = sample.value
+
+@inline _bounded_fold_domain_admits(::_AllBoundedValues, value) = true
+@inline _bounded_fold_domain_admits(domain::Where, value) =
+    domain.predicate(value)
 
 @inline evaluate_bounded(sample_at, fold::BoundedFold, maximum::Integer) =
     evaluate_bounded(fold, maximum, sample_at)

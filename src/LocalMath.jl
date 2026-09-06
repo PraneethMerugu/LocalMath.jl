@@ -39,7 +39,7 @@ public ArgMin, ArgMax, CanonicalSourceLaneTie, TieMin, TieMax
 public RejectOverflow, EmptyCollection
 public FoldComponent, InitializedState, BoundedWrites, FoldStep
 public initialized_state
-public BoundedFold, bounded_fold, Where
+public BoundedFold, fold, Where
 public RejectInvalid, SkipInvalid, FillInvalid, RejectEmpty
 public RelaxedAssociative
 public BoundedFoldOutcome, evaluate_bounded

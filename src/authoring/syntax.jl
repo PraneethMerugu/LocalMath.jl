@@ -1123,6 +1123,10 @@ function _lm_emit_stage(
         Expr(:tuple, item_symbol, reads_symbol, parameters_symbol,
             record_types_symbol)
     evaluator = Expr(:->, evaluator_arguments, evaluator_body)
+    if _lm_contains_fold_call(evaluator_body)
+        evaluator = :($(GlobalRef(LocalMath, :_ValidationAuthoringEvaluator))(
+            $evaluator))
+    end
     if !isempty(collection_targets)
         collections = Expr(:tuple,
             (field_locals[name] for name in collection_targets)...)
@@ -1145,6 +1149,19 @@ function _lm_emit_stage(
         $evaluator_spec, $control, $stage_origin))
     return Expr(:let, Expr(:block, let_bindings...),
         :($(GlobalRef(LocalMath, :LocalLaw))($stage)))
+end
+
+function _lm_contains_fold_call(value)
+    value isa GlobalRef &&
+        return value.mod === LocalMath && value.name === :fold
+    value isa QuoteNode && return false
+    value isa Expr || return false
+    if value.head === :. && length(value.args) == 2
+        name = value.args[2]
+        name = name isa QuoteNode ? name.value : name
+        name === :fold && return true
+    end
+    return any(_lm_contains_fold_call, value.args)
 end
 
 """Lower one authored stage directly to existing typed LocalMath values."""

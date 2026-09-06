@@ -77,7 +77,7 @@ function _ordered_fold_bounded_law(; transition_fold = nothing,
     neighbors = empty_input ?
         LWFSE.IndexRelation(keys => values_space; optional = true) :
         LWFSE.FixedRelation(source => values_space; degree = 2)
-    positive_sum = LWFSE.bounded_fold(identity, +, Int32(0),
+    positive_sum = LWFSE.BoundedFold(Int32, identity, +, Int32(0),
         (sum, count) -> sum;
         domain = LWFSE.Where(>(Int32(0))),
         oninvalid = LWFSE.RejectInvalid(),
