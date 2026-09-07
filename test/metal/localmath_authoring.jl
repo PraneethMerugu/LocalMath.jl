@@ -157,6 +157,24 @@ struct LocalMathMetalNode end
     @test Array(LocalMath.storage(rejected_fold, fold_output)) ==
         Float32[-1, -1]
 
+    fresh = LocalMath.CompactedStorage(
+        backend, Int32, 3;
+        group_count = 2, source_items = 6, source_position = true)
+    @test Array(fresh.count) == Int32[0]
+    @test Array(fresh.segment_starts) == Int32[1, 1, 1]
+    @test Array(fresh.source_item) == zeros(Int32, 3)
+    @test Array(fresh.source_lane) == zeros(Int32, 3)
+    @test Array(fresh.source_position) == zeros(Int32, 6)
+    empty_fresh = LocalMath.CompactedStorage(
+        backend, Int32, 0;
+        group_count = 0, source_items = 0, source_position = true)
+    @test Array(empty_fresh.count) == Int32[0]
+    @test Array(empty_fresh.segment_starts) == Int32[1]
+    @test isempty(empty_fresh.records)
+    @test isempty(empty_fresh.source_item)
+    @test isempty(empty_fresh.source_lane)
+    @test isempty(empty_fresh.source_position)
+
     records = LocalMath.Collection(Int32, 3)
     collected = LocalMath.@localmath item ∈ source begin
         records[item] = bounded_collect(Int32(item); maximum = 1,

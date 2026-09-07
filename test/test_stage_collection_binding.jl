@@ -38,11 +38,23 @@ end
 @testset "Collection and OrderedFold structural Stage boundary" begin
     backend = KernelAbstractions.CPU()
     allocated = LMCB.CompactedStorage(
-        backend, Int32, 4; group_count = 2, source_position = true)
+        backend, Int32, 4;
+        group_count = 2, source_items = 6, source_position = true)
     @test length(allocated.records) == 4
-    @test length(allocated.count) == 1
-    @test length(allocated.segment_starts) == 3
-    @test length(allocated.source_position) == 4
+    @test allocated.count == Int32[0]
+    @test allocated.segment_starts == Int32[1, 1, 1]
+    @test allocated.source_item == zeros(Int32, 4)
+    @test allocated.source_lane == zeros(Int32, 4)
+    @test allocated.source_position == zeros(Int32, 6)
+    empty_allocated = LMCB.CompactedStorage(
+        backend, Int32, 0;
+        group_count = 0, source_items = 0, source_position = true)
+    @test isempty(empty_allocated.records)
+    @test empty_allocated.count == Int32[0]
+    @test empty_allocated.segment_starts == Int32[1]
+    @test isempty(empty_allocated.source_item)
+    @test isempty(empty_allocated.source_lane)
+    @test isempty(empty_allocated.source_position)
     nodes = LMCB.Space(SCBNode, 3)
 
     collection = LMCB.Collection(Int32, 4)
