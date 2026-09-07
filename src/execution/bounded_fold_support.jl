@@ -45,7 +45,7 @@ end
     _evaluation_validation_fail!(_bounded_fold_validation(input), reason)
 
 @inline function _bounded_fold_admit(fold::BoundedFold, input, value)
-    fold.domain.predicate(value) && return (true, value)
+    _bounded_fold_domain_admits(fold.domain, value) && return (true, value)
     policy = fold.oninvalid
     policy isa SkipInvalid && return (false, value)
     policy isa FillInvalid && return (true, policy.value)
@@ -53,7 +53,14 @@ end
     return (false, value)
 end
 
-@inline function (fold::BoundedFold)(input)
+const _BoundedFoldInput = Union{
+    _StageRead,
+    _AuthoringValues,
+    _AuthoringSamples,
+    BoundedGroupView,
+}
+
+@inline function (fold::BoundedFold)(input::_BoundedFoldInput)
     maximum = _bounded_fold_input_count(input)
     outcome = evaluate_bounded(fold, maximum) do index
         sample = _bounded_fold_input_sample(input, index)
@@ -65,4 +72,14 @@ end
         _bounded_fold_reject!(input, reason)
     end
     return outcome.value
+end
+
+function (fold::BoundedFold)(input)
+    throw(LocalMathValidationError(
+        "fold accepts only a bounded relation gather or Collection group";
+        stage = :construct,
+        contract = :bounded_fold_input,
+        expected = :bounded_localmath_view,
+        actual = typeof(input),
+    ))
 end

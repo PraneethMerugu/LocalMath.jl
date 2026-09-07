@@ -66,7 +66,7 @@ equation namespace:
 | Collections | `CollectionAccess`, `CollectionCount`, `BoundedGroup`, `SourcePositionAccess`, `CompactedStorage`, `BoundedGroupView`, `one_group`, `group_by`, `source_order`, `canonical_by`, `persistent_source_position` |
 | Publication laws | `Unique`, `Reduce`, `Resolve`, `Collect`, `OrderedFold`, `TotalCoverage`, `PartialCoverage`, `UnreachableEmpty`, `PreserveEmpty`, `FillEmpty`, `IdentitySeed`, `ExistingSeed`, `CanonicalLeftFold`, `RelaxedAtomic`, `ArgMin`, `ArgMax`, `CanonicalSourceLaneTie`, `TieMin`, `TieMax`, `RejectOverflow`, `EmptyCollection` |
 | Ordered state | `FoldComponent`, `InitializedState`, `initialized_state`, `BoundedWrites`, `FoldStep` |
-| Bounded scalar operations | `BoundedFold`, `bounded_fold`, `Where`, `RejectInvalid`, `SkipInvalid`, `FillInvalid`, `RejectEmpty`, `RelaxedAssociative`, `BoundedFoldOutcome`, `evaluate_bounded` |
+| Bounded scalar operations | `fold`, `BoundedFold`, `Where`, `RejectInvalid`, `SkipInvalid`, `FillInvalid`, `RejectEmpty`, `RelaxedAssociative`, `BoundedFoldOutcome`, `evaluate_bounded` |
 | Evaluator outputs | `UniqueValue`, `ConditionalUniqueValue`, `RoutedUniqueValue`, `ConditionalRoutedUniqueValue`, `Contribution`, `RoutedContribution`, `ResolutionValue`, `RoutedResolutionValue`, `CollectedValue`, `GroupedCollectedValue`, `FoldValue` |
 | Advanced execution | `allocate_workspace`, `submission_capacity`, `ispending`, `success_gate` |
 
@@ -88,28 +88,38 @@ observable.
 
 ## Bounded scalar operators
 
-`LocalMath.bounded_fold` defines a concrete immutable operator over an already
-bounded relation gather or collection group. It does not accept arbitrary
-arrays or iterators, and it does not create a symbolic runtime:
+`LocalMath.fold` names the mathematical action and takes an already bounded
+relation gather or collection group first. It does not accept arbitrary arrays
+or iterators, and it does not create a symbolic runtime:
 
 ```julia
-geometric_mean = LocalMath.bounded_fold(
-    log, +, 0.0, (sum, count) -> exp(sum / count);
-    domain=LocalMath.Where(>(0)),
-    oninvalid=LocalMath.RejectInvalid(),
-    onempty=LocalMath.RejectEmpty(),
-    order=LocalMath.CanonicalLeftFold(),
+geometric_mean(values) = LocalMath.fold(
+    values;
+    map=log,
+    combine=+,
+    init=0.0f0,
+    finish=(total, count) -> exp(total / count),
+    domain=>(0.0f0),
+    invalid=:reject,
+    empty=:reject,
+    order=:canonical,
 )
 ```
 
 Optional absent lanes do not participate. Present values outside `domain`
-follow `RejectInvalid`, `SkipInvalid`, or `FillInvalid(value)`; empty inputs
-follow `RejectEmpty` or `FillEmpty(value)`. `finish(accumulator, count)` receives
-an `Int32` count. Rejection uses the containing stage's existing transaction
-barrier, so no output from that evaluation is published.
+use `invalid=:reject`, `invalid=:skip`, or an exact fill value; empty inputs use
+`empty=:reject` or an exact result fill. `finish(accumulator, count)` receives an
+`Int32` count. Rejection uses the containing stage's existing transaction
+barrier, so no output from that evaluation is published. Repeated endpoints
+participate repeatedly and canonical relation or collection order is preserved.
 
-`RelaxedAssociative` grants permission to reassociate a fold. It does not
-select a second executor; the canonical implementation remains valid.
+Domain compilers construct `LocalMath.BoundedFold(T, map, combine, init,
+finish; ...)` with the precise input type and policy values. That constructor
+closes the map, accumulator, and result types before planning.
+
+`order=:relaxed` grants permission to reassociate a fold. It does not select a
+second executor; the canonical implementation remains valid. Bounded scalar
+folding is distinct from the `OrderedFold` publication law for evolving state.
 
 ## Inspection
 

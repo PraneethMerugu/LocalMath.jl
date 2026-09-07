@@ -13,6 +13,23 @@ struct _AuthoringIndices{R}
     read::R
 end
 
+# Marks authored evaluators whose mathematical body can reject through the
+# existing evaluator-validation sink.  The marker is cold semantic admission
+# information only; it forwards to the same callable and creates no runtime
+# expression or execution path.
+struct _ValidationAuthoringEvaluator{F}
+    evaluator::F
+end
+@inline (operation::_ValidationAuthoringEvaluator)(item, reads, parameters) =
+    operation.evaluator(item, reads, parameters)
+@inline (operation::_ValidationAuthoringEvaluator)(
+    item, reads, parameters, record_types,
+) = operation.evaluator(item, reads, parameters, record_types)
+_device_evaluator_capture(operation::_ValidationAuthoringEvaluator) =
+    _device_evaluator_capture(operation.evaluator)
+_contains_bounded_fold_type(
+    ::Type{<:_ValidationAuthoringEvaluator}, seen = IdSet{Any}()) = true
+
 @inline _authoring_values(read) = _AuthoringValues(read)
 @inline _authoring_samples(read) = _AuthoringSamples(read)
 @inline _authoring_indices(read) = _AuthoringIndices(read)

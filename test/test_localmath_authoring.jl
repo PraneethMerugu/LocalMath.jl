@@ -66,20 +66,29 @@ end
 end
 
 @testset "bounded fold policies use the Stage transaction barrier" begin
+    checked = LMLM.BoundedFold(
+        Float32, identity, +, 0.0f0,
+        (total::Float32, ::Int32) -> total;
+        domain = LMLM.Where(>(0.0f0)),
+    )
+    @test isbitstype(typeof(checked))
+    @test_throws LMLM.LocalMathValidationError LMLM.BoundedFold(
+        Float32, identity, +, 0.0f0,
+        (total::Float32, ::Int32) -> total;
+        oninvalid = LMLM.FillInvalid(0.0),
+    )
+    @test_throws LMLM.LocalMathValidationError LMLM.fold(
+        Float32[1, 2]; combine = +, init = 0.0f0)
+
     sources = LMLM.Space(2)
     values_space = LMLM.Space(4)
     values = LMLM.Field(values_space, Float32)
     output = LMLM.Field(sources, Float32)
     neighborhoods = LMLM.FixedRelation(sources => values_space; degree = 2)
-    positive_sum = LMLM.bounded_fold(identity, +, 0.0f0,
-        (sum, count) -> sum;
-        domain = LMLM.Where(>(0.0f0)),
-        oninvalid = LMLM.RejectInvalid(),
-        onempty = LMLM.RejectEmpty(),
-        order = LMLM.CanonicalLeftFold())
     law = LMLM.@localmath i ∈ sources begin
         local_values = samples(values[neighborhoods(i)])
-        output[i] = positive_sum(local_values)
+        output[i] = LMLM.fold(local_values;
+            combine = +, init = 0.0f0, domain = >(0.0f0))
     end
     endpoints = reshape(Int32[1, 2, 3, 4], 2, 2)
     prepared = LMLM.prepare(law,
@@ -96,14 +105,10 @@ end
     @test_throws LMLM.LocalMathValidationError wait(LMLM.execute!(rejected))
     @test LMLM.storage(rejected, output) == fill(-1.0f0, 2)
 
-    forgiving = LMLM.bounded_fold(identity, +, 0.0f0,
-        (sum, count) -> sum;
-        domain = LMLM.Where(>(0.0f0)),
-        oninvalid = LMLM.SkipInvalid(),
-        onempty = LMLM.FillEmpty(42.0f0),
-        order = LMLM.RelaxedAssociative())
     forgiving_law = LMLM.@localmath i ∈ sources begin
-        output[i] = forgiving(samples(values[neighborhoods(i)]))
+        output[i] = LMLM.fold(samples(values[neighborhoods(i)]);
+            combine = +, init = 0.0f0, domain = >(0.0f0),
+            invalid = :skip, empty = 42.0f0, order = :relaxed)
     end
     forgiving_prepared = LMLM.prepare(forgiving_law,
         values => Float32[-1, -2, 3, 4], output => zeros(Float32, 2),

@@ -38,7 +38,7 @@
         :TieMin, :TieMax, :RejectOverflow, :EmptyCollection,
         :FoldComponent, :InitializedState, :initialized_state,
         :BoundedWrites, :FoldStep,
-        :BoundedFold, :bounded_fold, :Where,
+        :BoundedFold, :fold, :Where,
         :RejectInvalid, :SkipInvalid, :FillInvalid, :RejectEmpty,
         :RelaxedAssociative, :BoundedFoldOutcome, :evaluate_bounded,
         :UniqueValue, :ConditionalUniqueValue, :RoutedUniqueValue,

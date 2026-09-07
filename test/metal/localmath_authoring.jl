@@ -125,16 +125,10 @@ struct LocalMathMetalNode end
     fold_output = LocalMath.Field(fold_sources, Float32)
     neighborhoods = LocalMath.FixedRelation(
         fold_sources => fold_values_space; degree = 2)
-    positive_sum = LocalMath.bounded_fold(
-        identity, +, 0.0f0, (sum, count) -> sum;
-        domain = LocalMath.Where(>(0.0f0)),
-        oninvalid = LocalMath.RejectInvalid(),
-        onempty = LocalMath.RejectEmpty(),
-        order = LocalMath.CanonicalLeftFold(),
-    )
     fold_law = LocalMath.@localmath item ∈ fold_sources begin
-        fold_output[item] = positive_sum(
-            samples(fold_values[neighborhoods(item)]))
+        fold_output[item] = LocalMath.fold(
+            samples(fold_values[neighborhoods(item)]);
+            combine = +, init = 0.0f0, domain = >(0.0f0))
     end
     fold_prepared = LocalMath.prepare(fold_law,
         fold_values => LocalMath.Allocate(Float32[1, 2, 3, 4]),
