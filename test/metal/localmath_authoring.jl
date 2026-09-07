@@ -152,8 +152,23 @@ struct LocalMathMetalNode end
     @test Array(LocalMath.storage(rejected_fold, fold_output)) ==
         Float32[-1, -1]
 
+    sum_output = LocalMath.Field(fold_sources, Float32)
+    minimum_output = LocalMath.Field(fold_sources, Float32)
+    maximum_output = LocalMath.Field(fold_sources, Float32)
     mean_output = LocalMath.Field(fold_sources, Float32)
     geometric_output = LocalMath.Field(fold_sources, Float32)
+    sum_law = LocalMath.@localmath item ∈ fold_sources begin
+        values = fold_values[neighborhoods(item)]
+        sum_output[item] = sum(values)
+    end
+    minimum_law = LocalMath.@localmath item ∈ fold_sources begin
+        values = fold_values[neighborhoods(item)]
+        minimum_output[item] = minimum(values)
+    end
+    maximum_law = LocalMath.@localmath item ∈ fold_sources begin
+        values = fold_values[neighborhoods(item)]
+        maximum_output[item] = maximum(values)
+    end
     mean_law = LocalMath.@localmath item ∈ fold_sources begin
         values = fold_values[neighborhoods(item)]
         mean_output[item] = Statistics.mean(values)
@@ -162,15 +177,25 @@ struct LocalMathMetalNode end
         values = fold_values[neighborhoods(item)]
         geometric_output[item] = LocalMath.geometric_mean(values)
     end
-    reductions = LocalMath.sequence(mean_law, geometric_law)
+    reductions = LocalMath.sequence(
+        sum_law, minimum_law, maximum_law, mean_law, geometric_law)
     reductions_prepared = LocalMath.prepare(reductions,
         fold_values => LocalMath.Allocate(Float32[1, 4, 4, 16]),
+        sum_output => LocalMath.Allocate(undef),
+        minimum_output => LocalMath.Allocate(undef),
+        maximum_output => LocalMath.Allocate(undef),
         mean_output => LocalMath.Allocate(undef),
         geometric_output => LocalMath.Allocate(undef),
         neighborhoods => LocalMath.Allocate(
             reshape(Int32[1, 2, 3, 4], 2, 2));
         backend)
     wait(LocalMath.execute!(reductions_prepared))
+    @test Array(LocalMath.storage(reductions_prepared, sum_output)) ==
+        Float32[5, 20]
+    @test Array(LocalMath.storage(reductions_prepared, minimum_output)) ==
+        Float32[1, 4]
+    @test Array(LocalMath.storage(reductions_prepared, maximum_output)) ==
+        Float32[4, 16]
     @test Array(LocalMath.storage(reductions_prepared, mean_output)) ==
         Float32[2.5, 10]
     @test Array(LocalMath.storage(reductions_prepared, geometric_output)) ==

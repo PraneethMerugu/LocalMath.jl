@@ -571,11 +571,22 @@ end
         result, fields, item, port + 1, execution)
 end
 
-@inline _stage_read(stage, access::_PreparedStageAccess, item::Int32) =
-    _StageRead(stage.fields, access.relation, item, _NoEvaluationValidation())
-@inline _stage_read(stage, access::_PreparedStageAccess, item::Int32,
-        validation) =
-    _StageRead(stage.fields, access.relation, item, validation)
+@inline function _stage_read(
+        stage, access::_PreparedStageAccess{T}, item::Int32) where {T}
+    fields = stage.fields
+    relation = access.relation
+    validation = _NoEvaluationValidation()
+    return _StageRead{T,typeof(fields),typeof(relation),typeof(validation)}(
+        fields, relation, item, validation)
+end
+@inline function _stage_read(
+        stage, access::_PreparedStageAccess{T}, item::Int32,
+        validation) where {T}
+    fields = stage.fields
+    relation = access.relation
+    return _StageRead{T,typeof(fields),typeof(relation),typeof(validation)}(
+        fields, relation, item, validation)
+end
 @inline function _stage_read(stage,
         access::_PreparedCollectionAccess{<:_BoundedGroup{K}}, item::Int32
     ) where {K}

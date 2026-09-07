@@ -194,10 +194,7 @@ end
     @test !(prepared.accesses[1].relation.view isa LMPRE.Relation)
     @test !(prepared.publications[1].components[1].relation.view isa LMPRE.Relation)
 
-    read = LMPRE._StageRead(
-        prepared.fields, prepared.accesses[1].relation, Int32(2),
-        LMPRE._NoEvaluationValidation(),
-    )
+    read = LMPRE._stage_read(prepared, prepared.accesses[1], Int32(2))
     @test length(read) == 1
     @test read[1].value == 2.0f0
     @test read[1].present
@@ -205,13 +202,7 @@ end
 
     @test prepared.evaluator isa LMPRE._PortProjector{PreparedStageEvaluator}
     @test admission.result_type === NamedTuple{(:value,),Tuple{LMPRE.UniqueValue{Float32}}}
-    @test admission.signature == Tuple{
-        Int32,
-        Tuple{LMPRE._StageRead{
-            typeof(prepared.fields),typeof(prepared.accesses[1].relation),
-            LMPRE._NoEvaluationValidation}},
-        Tuple{Float32},
-    }
+    @test admission.signature == Tuple{Int32,Tuple{typeof(read)},Tuple{Float32}}
     @test !hasproperty(prepared, :backend)
     @test !hasproperty(prepared, :signature)
     @test LMPRE._stage_evaluator_parameters(
