@@ -312,6 +312,11 @@ function _pointwise_source_safe(value)
         # optimized typed IR below must inline them to the same closed set of
         # load-only primitives; an opaque user invoke remains rejected.
         binding isa Function && return true
+        # Hygienic authored code retains qualified calls such as
+        # `Statistics.mean`. Admit the constant module name only at this
+        # source pass; the typed-IR pass must still resolve the selected
+        # function to the same closed, load-only call graph.
+        binding isa Module && return true
         binding isa Type && parentmodule(binding) in (Base, Core) && return true
         binding isa DataType && isconcretetype(binding) && isbitstype(binding) &&
             _storage_free_type(binding) && return true
@@ -421,8 +426,9 @@ function _pointwise_method_instance_safe(
     # contract makes these two compiler entry points an explicit cold-boundary
     # dependency. Runtime execution never consumes this inspection result.
     depth < _POINTWISE_CALL_DEPTH_LIMIT || return false
-    haskey(analysis.memo, method_instance) &&
+    if haskey(analysis.memo, method_instance)
         return analysis.memo[method_instance]
+    end
     method_instance in analysis.active && return false
     spec = Base.unwrap_unionall(method_instance.specTypes)
     spec isa DataType && spec <: Tuple || return false

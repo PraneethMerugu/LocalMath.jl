@@ -3,10 +3,10 @@ include("authoring/preparation_syntax.jl")
 
 # Evaluator-side facades. Their only payload is the existing bounded read
 # capability, so they add no semantic or executable representation.
-struct _AuthoringValues{R}
+struct _AuthoringValues{T,R}
     read::R
 end
-struct _AuthoringSamples{R}
+struct _AuthoringSamples{T,R}
     read::R
 end
 struct _AuthoringIndices{R}
@@ -30,8 +30,6 @@ _device_evaluator_capture(operation::_ValidationAuthoringEvaluator) =
 _contains_bounded_fold_type(
     ::Type{<:_ValidationAuthoringEvaluator}, seen = IdSet{Any}()) = true
 
-@inline _authoring_values(read) = _AuthoringValues(read)
-@inline _authoring_samples(read) = _AuthoringSamples(read)
 @inline _authoring_indices(read) = _AuthoringIndices(read)
 
 @inline Base.length(view::Union{

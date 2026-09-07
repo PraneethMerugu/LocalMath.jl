@@ -1152,14 +1152,18 @@ function _lm_emit_stage(
 end
 
 function _lm_contains_fold_call(value)
-    value isa GlobalRef &&
-        return value.mod === LocalMath && value.name === :fold
+    fold_names = (:fold, :minimum, :maximum, :mean, :geometric_mean)
+    value isa GlobalRef && return value.name in fold_names
     value isa QuoteNode && return false
     value isa Expr || return false
+    if value.head === :call && !isempty(value.args)
+        callee = first(value.args)
+        callee isa Symbol && callee in fold_names && return true
+    end
     if value.head === :. && length(value.args) == 2
         name = value.args[2]
         name = name isa QuoteNode ? name.value : name
-        name === :fold && return true
+        name in fold_names && return true
     end
     return any(_lm_contains_fold_call, value.args)
 end

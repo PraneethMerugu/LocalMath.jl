@@ -1,11 +1,16 @@
 # The one bridge from a cold Stage projection to the descriptor-free warm ABI.
 
-struct _StageRead{F,R,V}
+struct _StageRead{T,F,R,V}
     fields::F
     relation::R
     item::Int32
     validation::V
 end
+
+@inline _authoring_values(read::_StageRead{T}) where {T} =
+    _AuthoringValues{T,typeof(read)}(read)
+@inline _authoring_samples(read::_StageRead{T}) where {T} =
+    _AuthoringSamples{T,typeof(read)}(read)
 
 # Effect admission is intentionally performed against a host-compilable
 # surrogate signature.  Array storage can be nested below the package-owned
@@ -45,8 +50,9 @@ end
 
 _pointwise_surrogate_type(::Type{T}) where {T<:_StageSurrogateContainer} =
     _stage_surrogate_container_type(T)
-function _pointwise_surrogate_type(::Type{_StageRead{F,R,V}}) where {F,R,V}
+function _pointwise_surrogate_type(::Type{_StageRead{T,F,R,V}}) where {T,F,R,V}
     return _StageRead{
+        T,
         _pointwise_surrogate_type(F),
         _pointwise_surrogate_type(R),
         V,
@@ -209,7 +215,7 @@ function _validate_stage_read_methods(signature)
     return all(_package_owned_stage_read_protocol, reads.parameters)
 end
 
-struct _PreparedStageAccess{R}; relation::R; end
+struct _PreparedStageAccess{T,R}; relation::R; end
 struct _PreparedCollectionAccess{L,S}; law::L; storage::S; end
 struct _PreparedStageComponent{R}; relation::R; end
 struct _PreparedStageCollection{S}; storage::S; end
@@ -280,7 +286,10 @@ struct _PreparedFieldGate{S<:_PreparedFieldSlot}; slot::S; end
 struct _PreparedStageControl{P,M,S,G}
     prefix::P; mask::M; subset::S; gate::G
 end
-Adapt.@adapt_structure _PreparedStageAccess
+function Adapt.adapt_structure(to, access::_PreparedStageAccess{T}) where {T}
+    relation = Adapt.adapt(to, access.relation)
+    return _PreparedStageAccess{T,typeof(relation)}(relation)
+end
 Adapt.@adapt_structure _PreparedCollectionAccess
 Adapt.@adapt_structure _PreparedStageComponent
 Adapt.@adapt_structure _PreparedStageCollection
@@ -495,8 +504,13 @@ function _projected_relation_view(validated::_ValidatedStructuralBinding,
     return _PreparedRelationUse(view, binding.generation, binding.status)
 end
 
-_prepare_stage_access(validated, layout, use::_ProjectedRelationUse) =
-    _PreparedStageAccess(_projected_relation_view(validated, layout, use))
+function _prepare_stage_access(validated, layout,
+        use::_ProjectedRelationUse{R,<:_PreparedFieldSlot{I}}) where {R,I}
+    field_slot = getfield(layout.fields, I)
+    T = eltype(_validated_field_binding(validated, field_slot).storage)
+    relation = _projected_relation_view(validated, layout, use)
+    return _PreparedStageAccess{T,typeof(relation)}(relation)
+end
 _prepare_stage_access(validated, layout, use::_ProjectedCollectionAccess) =
     _PreparedCollectionAccess(use.law,
         _collection_binding(validated, use.slot).storage)
@@ -957,8 +971,8 @@ Base.@nospecializeinfer Base.@noinline function _stage_draft_from_projection(
 end
 
 
-_stage_read_type(fields::Tuple, access::_PreparedStageAccess) =
-    Core.apply_type(_StageRead, typeof(fields), typeof(access.relation),
+_stage_read_type(fields::Tuple, access::_PreparedStageAccess{T}) where {T} =
+    Core.apply_type(_StageRead, T, typeof(fields), typeof(access.relation),
         _NoEvaluationValidation)
 function _stage_read_type(fields::Tuple,
         access::_PreparedCollectionAccess{<:_BoundedGroup{K}}) where {K}
