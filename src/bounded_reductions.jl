@@ -99,7 +99,7 @@ end
     return operation(values)
 end
 
-@generated function Base.sum(values::V) where {V<:_BoundedFoldInput}
+@inline @generated function Base.sum(values::V) where {V<:_BoundedFoldInput}
     T = _bounded_reduction_input_type(V)
     T <: _BoundedPrimitiveNumber ||
         return _inline_bounded_reduction(
@@ -109,7 +109,7 @@ end
         :(_bounded_sum_typed(values, $T, $R)))
 end
 
-@generated function Base.minimum(values::V) where {V<:_BoundedFoldInput}
+@inline @generated function Base.minimum(values::V) where {V<:_BoundedFoldInput}
     T = _bounded_reduction_input_type(V)
     T <: _BoundedPrimitiveNumber ||
         return _inline_bounded_reduction(
@@ -118,7 +118,7 @@ end
         :(_bounded_minimum_typed(values, $T)))
 end
 
-@generated function Base.maximum(values::V) where {V<:_BoundedFoldInput}
+@inline @generated function Base.maximum(values::V) where {V<:_BoundedFoldInput}
     T = _bounded_reduction_input_type(V)
     T <: _BoundedPrimitiveNumber ||
         return _inline_bounded_reduction(
@@ -127,7 +127,7 @@ end
         :(_bounded_maximum_typed(values, $T)))
 end
 
-@generated function Statistics.mean(values::V) where {V<:_BoundedFoldInput}
+@inline @generated function Statistics.mean(values::V) where {V<:_BoundedFoldInput}
     T = _bounded_reduction_input_type(V)
     T <: _BoundedPrimitiveNumber ||
         return _inline_bounded_reduction(
@@ -144,7 +144,7 @@ Compute the geometric mean of a bounded floating-point gather or Collection
 group in canonical lane order. Absent lanes do not participate. A nonpositive
 present value or empty input rejects the containing transaction.
 """
-@generated function geometric_mean(values::V) where {V<:_BoundedFoldInput}
+@inline @generated function geometric_mean(values::V) where {V<:_BoundedFoldInput}
     T = _bounded_reduction_input_type(V)
     T <: Union{Float16,Float32,Float64} ||
         return _inline_bounded_reduction(
