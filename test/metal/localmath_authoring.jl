@@ -2,6 +2,7 @@ using Test
 using Metal
 using LocalMath
 using StaticArrays
+using Statistics
 
 struct LocalMathMetalNode end
 

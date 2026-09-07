@@ -99,7 +99,7 @@ end
     return operation(values)
 end
 
-@inline @generated function Base.sum(values::V) where {V<:_BoundedFoldInput}
+function _bounded_sum_expression(::Type{V}) where {V}
     T = _bounded_reduction_input_type(V)
     T <: _BoundedPrimitiveNumber ||
         return _inline_bounded_reduction(
@@ -109,7 +109,7 @@ end
         :(_bounded_sum_typed(values, $T, $R)))
 end
 
-@inline @generated function Base.minimum(values::V) where {V<:_BoundedFoldInput}
+function _bounded_minimum_expression(::Type{V}) where {V}
     T = _bounded_reduction_input_type(V)
     T <: _BoundedPrimitiveNumber ||
         return _inline_bounded_reduction(
@@ -118,7 +118,7 @@ end
         :(_bounded_minimum_typed(values, $T)))
 end
 
-@inline @generated function Base.maximum(values::V) where {V<:_BoundedFoldInput}
+function _bounded_maximum_expression(::Type{V}) where {V}
     T = _bounded_reduction_input_type(V)
     T <: _BoundedPrimitiveNumber ||
         return _inline_bounded_reduction(
@@ -127,7 +127,7 @@ end
         :(_bounded_maximum_typed(values, $T)))
 end
 
-@inline @generated function Statistics.mean(values::V) where {V<:_BoundedFoldInput}
+function _bounded_mean_expression(::Type{V}) where {V}
     T = _bounded_reduction_input_type(V)
     T <: _BoundedPrimitiveNumber ||
         return _inline_bounded_reduction(
@@ -137,6 +137,33 @@ end
         :(_bounded_mean_typed(values, $T, $R)))
 end
 
+for (operation, expression) in (
+        (:sum, :_bounded_sum_expression),
+        (:minimum, :_bounded_minimum_expression),
+        (:maximum, :_bounded_maximum_expression),
+        (:mean, :_bounded_mean_expression),
+    )
+    owner = operation === :mean ? Statistics : Base
+    @eval begin
+        @inline @generated function $owner.$operation(
+                values::_StageRead{F,R,V}) where {F,R,V}
+            return $expression(_StageRead{F,R,V})
+        end
+        @inline @generated function $owner.$operation(
+                values::_AuthoringValues{R}) where {R}
+            return $expression(_AuthoringValues{R})
+        end
+        @inline @generated function $owner.$operation(
+                values::_AuthoringSamples{R}) where {R}
+            return $expression(_AuthoringSamples{R})
+        end
+        @inline @generated function $owner.$operation(
+                values::BoundedGroupView{K,T,R,V}) where {K,T,R,V}
+            return $expression(BoundedGroupView{K,T,R,V})
+        end
+    end
+end
+
 """
     LocalMath.geometric_mean(values)
 
@@ -144,11 +171,28 @@ Compute the geometric mean of a bounded floating-point gather or Collection
 group in canonical lane order. Absent lanes do not participate. A nonpositive
 present value or empty input rejects the containing transaction.
 """
-@inline @generated function geometric_mean(values::V) where {V<:_BoundedFoldInput}
+function _bounded_geometric_mean_expression(::Type{V}) where {V}
     T = _bounded_reduction_input_type(V)
     T <: Union{Float16,Float32,Float64} ||
         return _inline_bounded_reduction(
             :(_unsupported_bounded_reduction(:geometric_mean, $T)))
     return _inline_bounded_reduction(
         :(_bounded_geometric_mean_typed(values, $T)))
+end
+
+@inline @generated function geometric_mean(
+        values::_StageRead{F,R,V}) where {F,R,V}
+    return _bounded_geometric_mean_expression(_StageRead{F,R,V})
+end
+@inline @generated function geometric_mean(
+        values::_AuthoringValues{R}) where {R}
+    return _bounded_geometric_mean_expression(_AuthoringValues{R})
+end
+@inline @generated function geometric_mean(
+        values::_AuthoringSamples{R}) where {R}
+    return _bounded_geometric_mean_expression(_AuthoringSamples{R})
+end
+@inline @generated function geometric_mean(
+        values::BoundedGroupView{K,T,R,V}) where {K,T,R,V}
+    return _bounded_geometric_mean_expression(BoundedGroupView{K,T,R,V})
 end
