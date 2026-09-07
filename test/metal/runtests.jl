@@ -1,6 +1,7 @@
 using KernelAbstractions
 using LocalMath
 using Metal
+using Statistics
 using Test
 
 Metal.functional() || error("the selected Metal witness is not functional")

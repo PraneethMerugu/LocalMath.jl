@@ -1,3 +1,12 @@
+# LocalMath 0.2.0-rc2
+
+- Replaces callable-first bounded-fold authoring with `LocalMath.fold(values;
+  ...)`, while retaining the checked `BoundedFold` compiler law.
+- Adds familiar `sum`, `minimum`, `maximum`, `Statistics.mean`, and qualified
+  `LocalMath.geometric_mean` methods for bounded relation and Collection views.
+- Gives all bounded reductions explicit result-type, empty-input, absence, and
+  canonical-order semantics on the existing transaction-aware executor.
+
 # LocalMath 0.2.0-rc1
 
 - First independently versioned release candidate of the typed local scientific-computation language.
