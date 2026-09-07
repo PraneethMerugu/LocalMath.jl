@@ -1,6 +1,41 @@
 using Documenter
 using LocalMath
 
+pages = [
+    "Home" => "index.md",
+    "Quick start" => "learn/localmath-quickstart.md",
+    "Relations and storage" => "learn/localmath-relations.md",
+    "Scientific recipes" => "learn/localmath-recipes.md",
+    "Troubleshooting" => "learn/localmath-troubleshooting.md",
+    "Domain compilers" => "learn/localmath-domain-compiler.md",
+    "API" => "api/localmath.md",
+]
+
+function documented_pages(items)
+    paths = String[]
+    for item in items
+        value = item isa Pair ? last(item) : item
+        if value isa AbstractString
+            push!(paths, String(value))
+        else
+            append!(paths, documented_pages(value))
+        end
+    end
+    return paths
+end
+
+source_root = joinpath(@__DIR__, "src")
+source_pages = sort!(String[
+    relpath(joinpath(root, file), source_root)
+    for (root, _, files) in walkdir(source_root)
+    for file in files if endswith(file, ".md")
+])
+navigation_pages = sort!(documented_pages(pages))
+source_pages == navigation_pages || error(
+    "Documenter navigation must own every Markdown page; source=$(source_pages), " *
+    "navigation=$(navigation_pages)",
+)
+
 makedocs(
     sitename = "LocalMath.jl",
     authors = "Praneeth Merugu",
@@ -10,13 +45,5 @@ makedocs(
     pagesonly = true,
     checkdocs = :exports,
     remotes = nothing,
-    pages = [
-        "Home" => "index.md",
-        "Quick start" => "learn/localmath-quickstart.md",
-        "Relations and storage" => "learn/localmath-relations.md",
-        "Scientific recipes" => "learn/localmath-recipes.md",
-        "Troubleshooting" => "learn/localmath-troubleshooting.md",
-        "Domain compilers" => "learn/localmath-domain-compiler.md",
-        "API" => "api/localmath.md",
-    ],
+    pages = pages,
 )

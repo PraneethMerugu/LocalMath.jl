@@ -6,6 +6,8 @@ const LMDP = LocalMath
 
 @testset "semantic descriptors have compact mathematical displays" begin
     cells = LMDP.Space((4, 5))
+    factors = (LMDP.Space(2), LMDP.Space(3))
+    product = LMDP.Space(factors)
     values = LMDP.Field(cells, Float32)
     fixed = LMDP.FixedRelation(cells => cells; degree = 4)
     keys = LMDP.Field(cells, NTuple{2,Int32})
@@ -17,6 +19,7 @@ const LMDP = LocalMath
     records = LMDP.Collection(Tuple{Int32,Float32}, 12)
 
     space_text = sprint(show, cells)
+    product_text = sprint(show, product)
     field_text = sprint(show, values)
     fixed_text = sprint(show, fixed)
     indexed_text = sprint(show, indexed)
@@ -25,6 +28,10 @@ const LMDP = LocalMath
     detailed_relation = sprint(show, MIME("text/plain"), fixed)
 
     @test occursin("extent=(4, 5)", space_text)
+    @test occursin("kind=:product", product_text)
+    @test occursin("factor_extents=((2,), (3,))", product_text)
+    @test occursin("factor_ids=", product_text)
+    @test !occursin("_ProductSpaceKind", product_text)
     @test occursin("Field(Float32", field_text)
     @test occursin("FixedRelation", fixed_text)
     @test occursin("degree=4", fixed_text)
