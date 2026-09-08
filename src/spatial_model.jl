@@ -12,9 +12,11 @@ _new_semantic_identity() = UUIDs.uuid4()
 _storage_value_type(::Type{T}) where {T <: Union{Number, Bool, Enum}} =
     isconcretetype(T) && isbitstype(T)
 @generated function _storage_value_type(::Type{T}) where {T <: Union{Tuple, NamedTuple}}
-    qualified = isconcretetype(T) && isbitstype(T) &&
-        all(_storage_value_type, fieldtypes(T))
-    return qualified ? :(true) : :(false)
+    isconcretetype(T) && isbitstype(T) || return :(false)
+    # Recursive dispatch belongs in the generated body, not its definition-time
+    # world: fields may use the generic record predicate defined below.
+    checks = [:(_storage_value_type($field_type)) for field_type in fieldtypes(T)]
+    return foldl((left, right) -> :($left && $right), checks; init = :(true))
 end
 function _storage_value_type(::Type{T}) where {T <: StaticArrays.StaticArray}
     isconcretetype(T) && isbitstype(T) || return false
@@ -39,10 +41,11 @@ end
         }
     ) &&
         !(isdefined(Core, :LLVMPtr) && T <: Core.LLVMPtr) &&
-        isstructtype(T) &&
-        all(_storage_type_parameter, T.parameters) &&
-        all(_storage_value_type, fieldtypes(T))
-    return qualified ? :(true) : :(false)
+        isstructtype(T)
+    qualified || return :(false)
+    checks = [:(_storage_type_parameter($(QuoteNode(parameter)))) for parameter in T.parameters]
+    append!(checks, [:(_storage_value_type($field_type)) for field_type in fieldtypes(T)])
+    return foldl((left, right) -> :($left && $right), checks; init = :(true))
 end
 
 function _checked_semantic_int(value::Integer, purpose::Symbol; positive = false)

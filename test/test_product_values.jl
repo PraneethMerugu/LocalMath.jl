@@ -9,6 +9,14 @@ struct ProductValueUpdate{P}
     increment::P
 end
 
+struct TupleProductValueUpdate{T}
+    operations::T
+end
+
+@inline function (operation::TupleProductValueUpdate)(item::Int32, reads, parameters)
+    return only(operation.operations)(item, reads, parameters)
+end
+
 @inline function (operation::ProductValueUpdate)(item::Int32, reads, parameters)
     before = something(reads[1][1].value)
     increment = operation.increment
@@ -20,7 +28,7 @@ end
     return (value = LocalMath.UniqueValue(after),)
 end
 
-function test_product_value_publication(backend)
+function test_product_value_publication(backend; wrap = identity)
     initial = (active = false, count = Int32(2), polarity = SVector(1.0f0, 2.0f0))
     increment = (count = Int32(3), polarity = SVector(0.5f0, 1.0f0))
     space = LocalMath.Space(3)
@@ -30,7 +38,7 @@ function test_product_value_publication(backend)
     stage = LocalMath.Stage(
         space, (value = LocalMath.Access(input, relation; required = true),),
         (LocalMath.Publication((LocalMath.FieldPublication(output, relation, LocalMath.PublicationValue(:value)),), LocalMath.Unique(typeof(initial))),),
-        LocalMath.Evaluator(ProductValueUpdate(increment)), LocalMath.Control(),
+        LocalMath.Evaluator(wrap(ProductValueUpdate(increment))), LocalMath.Control(),
         LocalMath.SourceOrigin(:product_value_publication, 1),
     )
     prepared = LocalMath.prepare(
@@ -46,9 +54,15 @@ end
 
 @testset "named products share ordinary field publication" begin
     test_product_value_publication(KernelAbstractions.CPU())
+    test_product_value_publication(
+        KernelAbstractions.CPU(); wrap = operation -> TupleProductValueUpdate((operation,))
+    )
     for value in ((name = :metadata,), (values = Float32[1],), (pointer = Ptr{Float32}(0),))
         @test_throws LocalMath.LocalMathValidationError LocalMath.Field(LocalMath.Space(1), typeof(value))
         @test_throws LocalMath.LocalMathValidationError LocalMath.Evaluator(ProductValueUpdate(value))
+        @test_throws LocalMath.LocalMathValidationError LocalMath.Evaluator(
+            TupleProductValueUpdate((ProductValueUpdate(value),))
+        )
     end
 end
 
