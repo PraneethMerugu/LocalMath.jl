@@ -15,6 +15,7 @@ const LOCALMATH_METAL_WITNESSES = (
     "destination_grouping.jl",
     "product_values.jl",
     "ordered_fold_control.jl",
+    "empty_pointwise_domains.jl",
 )
 
 @testset "LocalMath Metal runner inventory" begin

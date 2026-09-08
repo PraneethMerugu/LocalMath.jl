@@ -91,6 +91,12 @@ Ordered-fold participation and publication are owned by
 retained destinations, and unchanged duplicate-order rejection through the
 ordinary CPU and Metal inventories.
 
+Pointwise traversal and its control checks are owned by
+`src/execution/candidate_stage.jl`. The shared fixture
+`test/fixtures/empty_pointwise_contracts.jl` checks empty-domain preparation,
+untouched backing storage, nonempty publication, and runtime-prefix diagnostics
+through the ordinary CPU and Metal inventories.
+
 Focused commands shorten the edit loop; they are not a second test inventory
 or release gate. Before handoff, run the complete suite of every changed
 package. Add the integration suite when a package boundary, extension, SciML

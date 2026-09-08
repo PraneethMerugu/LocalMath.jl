@@ -258,6 +258,25 @@ end
     return map(destination -> @inbounds(destination[item]), destinations)
 end
 
+@inline function _direct_pointwise_prefix(qualified, predecessors,
+        program_validation, lease_index::Int32, item::Int32)
+    stage = qualified.stage
+    if _candidate_prefix_succeeded(predecessors, lease_index) &&
+            _stage_gate_open(stage.control.gate, stage, qualified.parameters)
+        prefix = _stage_prefix_value(
+            stage.control.prefix, stage, qualified.parameters)
+        valid = prefix isa Integer && !(prefix isa Bool) &&
+            0 <= prefix <= stage.source_count
+        if item == 1 && !valid
+            _store_program_validation_status!(program_validation,
+                lease_index, _CANDIDATE_STATUS_INVALID_CONTROL,
+                Int32(0), Int32(0), Int32(0), UInt32(0))
+        end
+        return valid ? Int32(prefix) : Int32(-1)
+    end
+    return Int32(-1)
+end
+
 @inline function _direct_pointwise_member!(qualified, destinations,
         empty_policies, materializations, forwarding, cache, predecessors,
         program_validation, lease_index::Int32, item::Int32)
@@ -266,29 +285,20 @@ end
     stage = _pointwise_stage_with_fields(qualified.stage, fields)
     local_qualified = _QualifiedEvaluation(stage, qualified.parameters)
     published = _pointwise_current_values(destinations, item)
-    if _candidate_prefix_succeeded(predecessors, lease_index) &&
-            _stage_gate_open(stage.control.gate, stage, local_qualified.parameters)
-        prefix = _stage_prefix_value(
-            stage.control.prefix, stage, local_qualified.parameters)
-        valid = prefix isa Integer && !(prefix isa Bool) &&
-            0 <= prefix <= stage.source_count
-        if item == 1 && !valid
-            _store_program_validation_status!(program_validation,
-                lease_index, _CANDIDATE_STATUS_INVALID_CONTROL,
-                Int32(0), Int32(0), Int32(0), UInt32(0))
-        elseif item <= stage.source_count && valid
-            active = item <= Int32(prefix) &&
-                _stage_mask_active(stage.control.mask, stage, item) &&
-                _stage_subset_active(stage.control.subset, stage, item)
-            if active
-                result = _call_stage_evaluator(local_qualified, item,
-                    _stage_reads(stage, item), local_qualified.parameters)
-                published = _direct_unique_publish_all!(destinations, result,
-                    empty_policies, materializations, item)
-            else
-                published = _direct_unique_publish_all_empty!(
-                    destinations, empty_policies, materializations, item)
-            end
+    prefix = _direct_pointwise_prefix(local_qualified, predecessors,
+        program_validation, lease_index, item)
+    if prefix >= 0
+        active = item <= prefix &&
+            _stage_mask_active(stage.control.mask, stage, item) &&
+            _stage_subset_active(stage.control.subset, stage, item)
+        if active
+            result = _call_stage_evaluator(local_qualified, item,
+                _stage_reads(stage, item), local_qualified.parameters)
+            published = _direct_unique_publish_all!(destinations, result,
+                empty_policies, materializations, item)
+        else
+            published = _direct_unique_publish_all_empty!(
+                destinations, empty_policies, materializations, item)
         end
     end
     return published
@@ -328,9 +338,18 @@ end
         forwarding, predecessors, program_validation, lease_index::Int32)
     raw_item = @index(Global, Linear)
     item = Int32(raw_item)
-    _direct_pointwise_members!(qualified, destinations, empty_policies,
-        materializations, forwarding, (), predecessors,
-        program_validation, lease_index, item)
+    # Segment members share one traversal domain. The empty-domain lane still
+    # validates controls, but must never read a destination or evaluate a RHS.
+    if item <= first(qualified).stage.source_count
+        _direct_pointwise_members!(qualified, destinations, empty_policies,
+            materializations, forwarding, (), predecessors,
+            program_validation, lease_index, item)
+    elseif item == 1
+        foreach(qualified) do member
+            _direct_pointwise_prefix(member, predecessors,
+                program_validation, lease_index, item)
+        end
+    end
 end
 
 function _execute_direct_pointwise_segment!(
