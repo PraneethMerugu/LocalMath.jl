@@ -153,6 +153,12 @@ Record-valued Fields retain ordinary concrete isbits element types. Direct
 copies their component arrays to the selected backend while preserving shape,
 element type, and component structure.
 
+Immutable named products use the same recursive storage-value admission as
+tuples. Their names are compile-time labels, not runtime metadata values.
+Preparation validates nested record offsets, sizes, alignment, and each leaf's
+backend load/store support through the existing record-layout authority.
+This does not extend an atomic or reduction guarantee beyond its own tested law.
+
 Semantic descriptors have compact ordinary and `text/plain` displays.
 Descriptor presentation exposes scientific shape, element type, relation
 family, degree, storage requirement, capacity, optionality, boundary policy,

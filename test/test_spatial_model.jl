@@ -46,7 +46,7 @@
         nodes, Base.RefValue{Int32}
     )
     @test_throws LocalMath.LocalMathValidationError LocalMath.Field(
-        nodes, NamedTuple{(:label,),Tuple{Int32}}
+        nodes, NamedTuple{(:label,), Tuple{Symbol}}
     )
     @test_throws LocalMath.LocalMathValidationError LocalMath.Field(
         nodes, Val{1}
@@ -93,10 +93,11 @@
         schema_epoch = 3,
     )
     scalar_keys = LocalMath.Field(edges, Int32)
-    tuple_keys = LocalMath.Field(edges, Tuple{Int32,UInt32})
+    tuple_keys = LocalMath.Field(edges, Tuple{Int32, UInt32})
     indexed = LocalMath.IndexRelation(scalar_keys => nodes)
     optional_indexed = LocalMath.IndexRelation(
-        tuple_keys => nodes; optional = true)
+        tuple_keys => nodes; optional = true
+    )
     masked = LocalMath.MaskedRelation(identity, mask)
     selected_space = LocalMath.Space(TestEdge, 3)
     injection = LocalMath.FixedRelation(
@@ -145,11 +146,13 @@
     )
     @test typeof(fixed) === typeof(fixed_other)
     @test typeof(packed) === typeof(packed_other)
-    @test typeof(runtime) === typeof(LocalMath.RuntimeRelation(
-        edges => nodes;
-        degree_bound = 9, key_type = UInt32,
-        schema_epoch = 99,
-    ))
+    @test typeof(runtime) === typeof(
+        LocalMath.RuntimeRelation(
+            edges => nodes;
+            degree_bound = 9, key_type = UInt32,
+            schema_epoch = 99,
+        )
+    )
 
     # Structural validation is now the sole package-owned proof minter;
     # callers still cannot construct a proof or validated evidence directly.
@@ -174,7 +177,8 @@
         degree_bound = 1, key_type = Vector{Int32},
     )
     @test_throws LocalMath.LocalMathValidationError LocalMath.IndexRelation(
-        LocalMath.Field(edges, Float32) => nodes)
+        LocalMath.Field(edges, Float32) => nodes
+    )
     @test_throws LocalMath.LocalMathValidationError LocalMath.PackedRelation(
         nodes => edges;
         degree_bound = 2, capacity = 5, layout = :compressed_offsets,

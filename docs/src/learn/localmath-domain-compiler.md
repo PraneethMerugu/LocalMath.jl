@@ -74,3 +74,9 @@ The durable ownership split is:
 When lowering fails, retain the source origin from the domain operation. An
 unsupported footprint should be rejected cold with that provenance rather
 than captured in an opaque evaluator or guessed at runtime.
+
+Logical-value admission is owned by `spatial_model.jl`; evaluator capture uses
+that same predicate in `stage_model.jl`. Physical record layout and leaf backend
+operations are validated in `execution/mechanism_support.jl`, then consumed by
+ordinary preparation and the KernelAbstractions executor. The product-value
+publication tests exercise this chain without a separate packed-value executor.

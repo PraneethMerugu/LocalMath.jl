@@ -13,13 +13,16 @@ const LOCALMATH_METAL_WITNESSES = (
     "localmath_authoring.jl",
     "localmath_correctness.jl",
     "destination_grouping.jl",
+    "product_values.jl",
 )
 
 @testset "LocalMath Metal runner inventory" begin
-    discovered = Set(filter(
-        name -> endswith(name, ".jl") && name != "runtests.jl",
-        readdir(@__DIR__),
-    ))
+    discovered = Set(
+        filter(
+            name -> endswith(name, ".jl") && name != "runtests.jl",
+            readdir(@__DIR__),
+        )
+    )
     @test discovered == Set(LOCALMATH_METAL_WITNESSES)
 end
 
@@ -49,13 +52,16 @@ end
     zbuffer = run_localmath_zbuffer_witness(Metal.MtlArray; backend)
     dem = run_localmath_compacted_dem_contacts_witness(Metal.MtlArray; backend)
     active_fem = run_localmath_compacted_active_fem_witness(
-        Metal.MtlArray; backend)
+        Metal.MtlArray; backend
+    )
     particle_cells = run_localmath_compacted_particle_cells_witness(
-        Metal.MtlArray; backend)
+        Metal.MtlArray; backend
+    )
     rsa = run_localmath_ordered_rsa_witness(Metal.MtlArray; backend)
     pgs = run_localmath_ordered_pgs_3d_witness(Metal.MtlArray; backend)
     chemistry = run_localmath_ordered_stoichiometry_witness(
-        Metal.MtlArray; backend)
+        Metal.MtlArray; backend
+    )
     authored = run_localmath_authored_domain_witness(Metal.MtlArray; backend)
 
     @test lbm.result == lbm.reference

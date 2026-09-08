@@ -9,14 +9,14 @@ _new_semantic_identity() = UUIDs.uuid4()
 # One conservative storage-value predicate shared by semantic Fields and the
 # stage model.  It deliberately excludes pointer/reference and metadata-rich
 # values even when Julia reports them as isbits.
-_storage_value_type(::Type{T}) where {T<:Union{Number,Bool,Enum}} =
+_storage_value_type(::Type{T}) where {T <: Union{Number, Bool, Enum}} =
     isconcretetype(T) && isbitstype(T)
-@generated function _storage_value_type(::Type{T}) where {T<:Tuple}
+@generated function _storage_value_type(::Type{T}) where {T <: Union{Tuple, NamedTuple}}
     qualified = isconcretetype(T) && isbitstype(T) &&
         all(_storage_value_type, fieldtypes(T))
     return qualified ? :(true) : :(false)
 end
-function _storage_value_type(::Type{T}) where {T<:StaticArrays.StaticArray}
+function _storage_value_type(::Type{T}) where {T <: StaticArrays.StaticArray}
     isconcretetype(T) && isbitstype(T) || return false
     dimensions = Tuple(StaticArrays.Size(T))
     all(dimension -> 0 <= dimension <= 32, dimensions) || return false
@@ -33,9 +33,11 @@ end
 
 @generated function _storage_value_type(::Type{T}) where {T}
     qualified = isconcretetype(T) && isbitstype(T) &&
-        !(T <: Union{
-            Symbol,UUIDs.UUID,Ptr,Ref,AbstractArray,NamedTuple,Val,Function,
-        }) &&
+        !(
+        T <: Union{
+            Symbol, UUIDs.UUID, Ptr, Ref, AbstractArray, NamedTuple, Val, Function,
+        }
+    ) &&
         !(isdefined(Core, :LLVMPtr) && T <: Core.LLVMPtr) &&
         isstructtype(T) &&
         all(_storage_type_parameter, T.parameters) &&
@@ -47,19 +49,23 @@ function _checked_semantic_int(value::Integer, purpose::Symbol; positive = false
     converted = try
         Int(value)
     catch
-        throw(LocalMathValidationError(
-            "$purpose does not fit the host index type";
-            stage = :construct, contract = purpose,
-            expected = :representable_integer, actual = value,
-        ))
+        throw(
+            LocalMathValidationError(
+                "$purpose does not fit the host index type";
+                stage = :construct, contract = purpose,
+                expected = :representable_integer, actual = value,
+            )
+        )
     end
     lower = positive ? 1 : 0
-    lower <= converted <= typemax(Int32) || throw(LocalMathValidationError(
-        "$purpose is outside the common Int32 execution-index ABI";
-        stage = :construct, contract = purpose,
-        expected = positive ? (1:typemax(Int32)) : (0:typemax(Int32)),
-        actual = value,
-    ))
+    lower <= converted <= typemax(Int32) || throw(
+        LocalMathValidationError(
+            "$purpose is outside the common Int32 execution-index ABI";
+            stage = :construct, contract = purpose,
+            expected = positive ? (1:typemax(Int32)) : (0:typemax(Int32)),
+            actual = value,
+        )
+    )
     return converted
 end
 
@@ -69,35 +75,43 @@ function _checked_semantic_product(values, purpose::Symbol)
         product = try
             Base.checked_mul(product, Int(value))
         catch
-            throw(LocalMathValidationError(
-                "$purpose overflows the common execution-index ABI";
-                stage = :construct, contract = purpose,
-                expected = 0:typemax(Int32), actual = values,
-            ))
+            throw(
+                LocalMathValidationError(
+                    "$purpose overflows the common execution-index ABI";
+                    stage = :construct, contract = purpose,
+                    expected = 0:typemax(Int32), actual = values,
+                )
+            )
         end
-        product <= typemax(Int32) || throw(LocalMathValidationError(
-            "$purpose exceeds the common Int32 execution-index ABI";
-            stage = :construct, contract = purpose,
-            expected = 0:typemax(Int32), actual = product,
-        ))
+        product <= typemax(Int32) || throw(
+            LocalMathValidationError(
+                "$purpose exceeds the common Int32 execution-index ABI";
+                stage = :construct, contract = purpose,
+                expected = 0:typemax(Int32), actual = product,
+            )
+        )
     end
     return product
 end
 
 function _checked_schema_epoch(value::Integer)
-    value >= 0 || throw(LocalMathValidationError(
-        "a relation schema epoch must be nonnegative";
-        stage = :construct, contract = :relation_schema_epoch,
-        expected = :uint64, actual = value,
-    ))
+    value >= 0 || throw(
+        LocalMathValidationError(
+            "a relation schema epoch must be nonnegative";
+            stage = :construct, contract = :relation_schema_epoch,
+            expected = :uint64, actual = value,
+        )
+    )
     return try
         UInt64(value)
     catch
-        throw(LocalMathValidationError(
-            "a relation schema epoch does not fit UInt64";
-            stage = :construct, contract = :relation_schema_epoch,
-            expected = :uint64, actual = value,
-        ))
+        throw(
+            LocalMathValidationError(
+                "a relation schema epoch does not fit UInt64";
+                stage = :construct, contract = :relation_schema_epoch,
+                expected = :uint64, actual = value,
+            )
+        )
     end
 end
 
@@ -109,34 +123,36 @@ struct _ProductSpaceStructure{F}
 end
 
 """A typed finite semantic index domain with stable value-level identity."""
-struct Space{K,N,S}
+struct Space{K, N, S}
     id::UUIDs.UUID
-    extent::NTuple{N,Int}
+    extent::NTuple{N, Int}
     structure::S
 end
 
 function Space(
-        ::Type{K}, extent::Tuple{Vararg{Integer,N}};
+        ::Type{K}, extent::Tuple{Vararg{Integer, N}};
         id::UUIDs.UUID = _new_semantic_identity(),
         structure = _PlainSpaceStructure(),
-    ) where {K,N}
-    N > 0 || throw(LocalMathValidationError(
-        "a Space must have at least one dimension";
-        stage = :construct, contract = :space_dimension,
-        expected = :positive, actual = N,
-    ))
+    ) where {K, N}
+    N > 0 || throw(
+        LocalMathValidationError(
+            "a Space must have at least one dimension";
+            stage = :construct, contract = :space_dimension,
+            expected = :positive, actual = N,
+        )
+    )
     canonical = ntuple(
         axis -> _checked_semantic_int(extent[axis], :space_extent), Val(N)
     )
     _checked_semantic_product(canonical, :space_cardinality)
-    return Space{K,N,typeof(structure)}(id, canonical, structure)
+    return Space{K, N, typeof(structure)}(id, canonical, structure)
 end
 
 Space(::Type{K}, extent::Integer; kwargs...) where {K} =
     Space(K, (extent,); kwargs...)
 
 """Construct an ordinary anonymous finite index space."""
-Space(extent::Tuple{Integer,Vararg{Integer}}; kwargs...) =
+Space(extent::Tuple{Integer, Vararg{Integer}}; kwargs...) =
     Space(_IndexSpaceKind, extent; kwargs...)
 Space(::Tuple{}; kwargs...) = Space(_IndexSpaceKind, (); kwargs...)
 Space(extent::Integer; kwargs...) = Space(_IndexSpaceKind, extent; kwargs...)
@@ -147,16 +163,20 @@ _IndexSpace(extent; id::UUIDs.UUID = _new_semantic_identity()) =
 function _ProductSpace(
         factors::Tuple; id::UUIDs.UUID = _new_semantic_identity()
     )
-    isempty(factors) && throw(LocalMathValidationError(
-        "a product Space requires at least one factor";
-        stage = :construct, contract = :product_space_factors,
-        expected = :nonempty_space_tuple, actual = factors,
-    ))
-    all(factor -> factor isa Space, factors) || throw(LocalMathValidationError(
-        "every product-space factor must be a Space";
-        stage = :construct, contract = :product_space_factors,
-        expected = Space, actual = map(typeof, factors),
-    ))
+    isempty(factors) && throw(
+        LocalMathValidationError(
+            "a product Space requires at least one factor";
+            stage = :construct, contract = :product_space_factors,
+            expected = :nonempty_space_tuple, actual = factors,
+        )
+    )
+    all(factor -> factor isa Space, factors) || throw(
+        LocalMathValidationError(
+            "every product-space factor must be a Space";
+            stage = :construct, contract = :product_space_factors,
+            expected = Space, actual = map(typeof, factors),
+        )
+    )
     cardinality = _checked_semantic_product(
         map(length, factors), :product_space_cardinality
     )
@@ -173,7 +193,7 @@ Construct the Cartesian product of a nonempty tuple of finite spaces. Its
 cardinality is the product of the factor cardinalities, and factor order is the
 coordinate order used by `ProductRelation`.
 """
-Space(factors::Tuple{Space,Vararg{Space}}; kwargs...) = _ProductSpace(factors; kwargs...)
+Space(factors::Tuple{Space, Vararg{Space}}; kwargs...) = _ProductSpace(factors; kwargs...)
 
 semantic_identity(space::Space) = space.id
 space_kind(::Space{K}) where {K} = K
@@ -193,20 +213,22 @@ Base.hash(space::Space, seed::UInt) = hash(
 )
 
 """Exact isbits element placement on a semantic `Space`; never storage."""
-struct Field{T,S<:Space}
+struct Field{T, S <: Space}
     id::UUIDs.UUID
     space::S
 end
 
 function Field(
         space::S, ::Type{T}; id::UUIDs.UUID = _new_semantic_identity()
-    ) where {S<:Space,T}
-    _storage_value_type(T) || throw(LocalMathValidationError(
-        "a Field requires an admitted storage value type";
-        stage = :construct, contract = :field_element_type,
-        expected = :numeric_bool_enum_tuple_or_static_array, actual = T,
-    ))
-    return Field{T,S}(id, space)
+    ) where {S <: Space, T}
+    _storage_value_type(T) || throw(
+        LocalMathValidationError(
+            "a Field requires an admitted storage value type";
+            stage = :construct, contract = :field_element_type,
+            expected = :numeric_bool_enum_tuple_or_static_array, actual = T,
+        )
+    )
+    return Field{T, S}(id, space)
 end
 
 semantic_identity(field::Field) = field.id
@@ -222,7 +244,7 @@ Base.hash(field::Field, seed::UInt) = hash(
 # mathematical payload types. UUIDs, extents, epochs, degrees and capacities
 # remain fields rather than specialization keys.
 struct _IdentityRelation end
-struct _AffineRelation{O,R}
+struct _AffineRelation{O, R}
     offsets::O
     origin::R
 end
@@ -242,24 +264,24 @@ end
 struct StrictBoundary end
 """`PeriodicBoundary(axes)` wraps the selected Cartesian axes."""
 struct PeriodicBoundary{D}
-    axes::NTuple{D,Bool}
+    axes::NTuple{D, Bool}
 end
 """`ExteriorBoundary()` represents out-of-domain lanes as absent samples."""
 struct ExteriorBoundary end
-struct MaskedBoundary{F,B}
+struct MaskedBoundary{F, B}
     mask::F
     fallback::B
 end
-struct GhostBoundary{D,S<:Space}
-    lower::NTuple{D,Int}
-    upper::NTuple{D,Int}
+struct GhostBoundary{D, S <: Space}
+    lower::NTuple{D, Int}
+    upper::NTuple{D, Int}
     ghost_space::S
 end
 const _BoundaryPolicy = Union{
-    StrictBoundary,PeriodicBoundary,ExteriorBoundary,
-    MaskedBoundary,GhostBoundary,
+    StrictBoundary, PeriodicBoundary, ExteriorBoundary,
+    MaskedBoundary, GhostBoundary,
 }
-struct _BoundaryRelation{R,P}
+struct _BoundaryRelation{R, P}
     base::R
     policy::P
     degree::Int
@@ -275,12 +297,12 @@ struct _FieldIndexRelation{F}
     degree::Int
     optional::Bool
 end
-struct _MaskedRelation{R,F}
+struct _MaskedRelation{R, F}
     base::R
     mask::F
     degree::Int
 end
-struct _SelectedRelation{R,I}
+struct _SelectedRelation{R, I}
     base::R
     injection::I
     degree::Int
@@ -297,7 +319,7 @@ struct _PackedRelation
 end
 
 """One storage-free semantic relation wrapper."""
-struct Relation{R,D<:Space,C<:Space}
+struct Relation{R, D <: Space, C <: Space}
     id::UUIDs.UUID
     domain::D
     codomain::C
@@ -329,7 +351,7 @@ degree_bound(relation::Relation{<:_AffineRelation}) =
     length(relation.representation.offsets)
 
 function _relation(
-        pair::Pair{<:Space,<:Space}, representation;
+        pair::Pair{<:Space, <:Space}, representation;
         id::UUIDs.UUID, schema_epoch::Integer,
     )
     epoch = _checked_schema_epoch(schema_epoch)
@@ -350,33 +372,41 @@ function _canonical_affine_offset(offset, dimensions::Int)
     values = try
         Tuple(offset)
     catch
-        throw(LocalMathValidationError(
-            "an affine offset must be an integer coordinate tuple";
-            stage = :construct, contract = :affine_offset_type,
-            expected = :integer_tuple, actual = typeof(offset),
-        ))
-    end
-    length(values) == dimensions || throw(LocalMathValidationError(
-        "an affine offset dimensionality does not match its source Space";
-        stage = :construct, contract = :affine_offset_dimension,
-        expected = dimensions, actual = length(values),
-    ))
-    all(value -> value isa Integer, values) || throw(LocalMathValidationError(
-        "affine offsets must contain integers";
-        stage = :construct, contract = :affine_offset_type,
-        expected = Integer, actual = typeof(offset),
-    ))
-    return ntuple(axis -> begin
-        value = Int(values[axis])
-        typemin(Int32) <= value <= typemax(Int32) || throw(
+        throw(
             LocalMathValidationError(
-                "an affine offset exceeds the Int32 execution ABI";
-                stage = :construct, contract = :affine_offset_value,
-                expected = typemin(Int32):typemax(Int32), actual = value,
+                "an affine offset must be an integer coordinate tuple";
+                stage = :construct, contract = :affine_offset_type,
+                expected = :integer_tuple, actual = typeof(offset),
             )
         )
-        value
-    end, dimensions)
+    end
+    length(values) == dimensions || throw(
+        LocalMathValidationError(
+            "an affine offset dimensionality does not match its source Space";
+            stage = :construct, contract = :affine_offset_dimension,
+            expected = dimensions, actual = length(values),
+        )
+    )
+    all(value -> value isa Integer, values) || throw(
+        LocalMathValidationError(
+            "affine offsets must contain integers";
+            stage = :construct, contract = :affine_offset_type,
+            expected = Integer, actual = typeof(offset),
+        )
+    )
+    return ntuple(
+        axis -> begin
+            value = Int(values[axis])
+            typemin(Int32) <= value <= typemax(Int32) || throw(
+                LocalMathValidationError(
+                    "an affine offset exceeds the Int32 execution ABI";
+                    stage = :construct, contract = :affine_offset_value,
+                    expected = typemin(Int32):typemax(Int32), actual = value,
+                )
+            )
+            value
+        end, dimensions
+    )
 end
 
 """
@@ -385,33 +415,41 @@ end
 Construct a storage-free fixed Cartesian offset gather.
 """
 function AffineRelation(
-        pair::Pair{<:Space,<:Space}; offsets,
+        pair::Pair{<:Space, <:Space}; offsets,
         origin = nothing,
         id::UUIDs.UUID = _new_semantic_identity(), schema_epoch::Integer = 0,
     )
     ndims = length(size(first(pair)))
-    length(size(last(pair))) == ndims || throw(LocalMathValidationError(
-        "an affine relation requires equal domain/codomain dimensionality";
-        stage = :construct, contract = :affine_endpoint_dimension,
-        expected = ndims, actual = length(size(last(pair))),
-    ))
+    length(size(last(pair))) == ndims || throw(
+        LocalMathValidationError(
+            "an affine relation requires equal domain/codomain dimensionality";
+            stage = :construct, contract = :affine_endpoint_dimension,
+            expected = ndims, actual = length(size(last(pair))),
+        )
+    )
     canonical = Tuple(
         _canonical_affine_offset(offset, ndims) for offset in offsets
     )
-    isempty(canonical) && throw(LocalMathValidationError(
-        "an affine relation requires at least one offset";
-        stage = :construct, contract = :affine_degree_bound,
-        expected = :positive, actual = 0,
-    ))
-    length(canonical) <= 32 || throw(LocalMathValidationError(
-        "an affine relation is a small static stencil with at most 32 lanes";
-        stage = :construct, contract = :affine_degree_bound,
-        expected = 1:32, actual = length(canonical),
-    ))
+    isempty(canonical) && throw(
+        LocalMathValidationError(
+            "an affine relation requires at least one offset";
+            stage = :construct, contract = :affine_degree_bound,
+            expected = :positive, actual = 0,
+        )
+    )
+    length(canonical) <= 32 || throw(
+        LocalMathValidationError(
+            "an affine relation is a small static stencil with at most 32 lanes";
+            stage = :construct, contract = :affine_degree_bound,
+            expected = 1:32, actual = length(canonical),
+        )
+    )
     canonical_origin = origin === nothing ? ntuple(_ -> 0, ndims) :
         _canonical_affine_offset(origin, ndims)
-    return _relation(pair, _AffineRelation(canonical, canonical_origin);
-        id, schema_epoch)
+    return _relation(
+        pair, _AffineRelation(canonical, canonical_origin);
+        id, schema_epoch
+    )
 end
 
 """
@@ -421,7 +459,7 @@ Declare stored fixed-degree topology. Bind `:endpoints` in lane-major order and
 optionally `:counts` for incomplete rows.
 """
 function FixedRelation(
-        pair::Pair{<:Space,<:Space}; degree::Integer,
+        pair::Pair{<:Space, <:Space}; degree::Integer,
         id::UUIDs.UUID = _new_semantic_identity(), schema_epoch::Integer = 0,
     )
     representation = _FixedRelation(
@@ -438,19 +476,23 @@ product `Space`s whose factors match the relation domains and codomains. Lane
 degree is the product of factor degrees.
 """
 function ProductRelation(
-        pair::Pair{<:Space,<:Space}, factors::Tuple;
+        pair::Pair{<:Space, <:Space}, factors::Tuple;
         id::UUIDs.UUID = _new_semantic_identity(), schema_epoch::Integer = 0,
     )
-    isempty(factors) && throw(LocalMathValidationError(
-        "a product relation requires at least one factor";
-        stage = :construct, contract = :product_relation_factors,
-        expected = :nonempty_relation_tuple, actual = factors,
-    ))
-    all(factor -> factor isa Relation, factors) || throw(LocalMathValidationError(
-        "every product factor must be a Relation";
-        stage = :construct, contract = :product_relation_factors,
-        expected = Relation, actual = map(typeof, factors),
-    ))
+    isempty(factors) && throw(
+        LocalMathValidationError(
+            "a product relation requires at least one factor";
+            stage = :construct, contract = :product_relation_factors,
+            expected = :nonempty_relation_tuple, actual = factors,
+        )
+    )
+    all(factor -> factor isa Relation, factors) || throw(
+        LocalMathValidationError(
+            "every product factor must be a Relation";
+            stage = :construct, contract = :product_relation_factors,
+            expected = Relation, actual = map(typeof, factors),
+        )
+    )
     first(pair) isa Space{_ProductSpaceKind} &&
         last(pair) isa Space{_ProductSpaceKind} || throw(
         LocalMathValidationError(
@@ -493,27 +535,33 @@ function compose(
                 stage = :construct, contract = :composed_relation_adjacency,
                 expected = codomain(factors[index]),
                 actual = domain(factors[index + 1]),
-            ))
+            )
+        )
     end
     degree = _checked_semantic_product(
-        map(degree_bound, factors), :composed_relation_degree)
-    degree <= _MAX_STATIC_COMPOSED_RELATION_DEGREE || throw(LocalMathValidationError(
-        "a composed Relation degree product must fit the static Stage lane bound";
-        stage = :construct, contract = :composed_relation_degree,
-        expected = 1:_MAX_STATIC_COMPOSED_RELATION_DEGREE, actual = degree,
-    ))
-    return _relation(domain(first_relation) => codomain(last(factors)),
-        _ComposedRelation(factors, degree); id, schema_epoch)
+        map(degree_bound, factors), :composed_relation_degree
+    )
+    degree <= _MAX_STATIC_COMPOSED_RELATION_DEGREE || throw(
+        LocalMathValidationError(
+            "a composed Relation degree product must fit the static Stage lane bound";
+            stage = :construct, contract = :composed_relation_degree,
+            expected = 1:_MAX_STATIC_COMPOSED_RELATION_DEGREE, actual = degree,
+        )
+    )
+    return _relation(
+        domain(first_relation) => codomain(last(factors)),
+        _ComposedRelation(factors, degree); id, schema_epoch
+    )
 end
 
 """`MaskedBoundary(mask, fallback)` makes masked lanes absent before applying `fallback`."""
 function MaskedBoundary(mask::Field{Bool}, fallback::_BoundaryPolicy)
-    return MaskedBoundary{typeof(mask),typeof(fallback)}(mask, fallback)
+    return MaskedBoundary{typeof(mask), typeof(fallback)}(mask, fallback)
 end
 """`GhostBoundary(lower, upper, ghost_space)` routes exterior lanes to explicit ghost storage."""
 function GhostBoundary(
-        lower::Tuple{Vararg{Integer,D}},
-        upper::Tuple{Vararg{Integer,D}},
+        lower::Tuple{Vararg{Integer, D}},
+        upper::Tuple{Vararg{Integer, D}},
         ghost_space::Space,
     ) where {D}
     canonical_lower = ntuple(
@@ -528,11 +576,13 @@ end
 _validate_boundary_policy(base::Relation, ::StrictBoundary) = nothing
 _validate_boundary_policy(base::Relation, ::ExteriorBoundary) = nothing
 function _validate_boundary_policy(base::Relation, policy::PeriodicBoundary{D}) where {D}
-    length(size(codomain(base))) == D || throw(LocalMathValidationError(
-        "periodic axes do not match the relation dimensionality";
-        stage = :construct, contract = :periodic_boundary_dimension,
-        expected = length(size(codomain(base))), actual = D,
-    ))
+    length(size(codomain(base))) == D || throw(
+        LocalMathValidationError(
+            "periodic axes do not match the relation dimensionality";
+            stage = :construct, contract = :periodic_boundary_dimension,
+            expected = length(size(codomain(base))), actual = D,
+        )
+    )
     for axis in 1:D
         policy.axes[axis] && size(codomain(base))[axis] == 0 && throw(
             LocalMathValidationError(
@@ -545,21 +595,25 @@ function _validate_boundary_policy(base::Relation, policy::PeriodicBoundary{D}) 
     return nothing
 end
 function _validate_boundary_policy(base::Relation, policy::MaskedBoundary)
-    policy.mask.space == codomain(base) || throw(LocalMathValidationError(
-        "a boundary mask must be placed on the relation codomain";
-        stage = :construct, contract = :masked_boundary_space,
-        expected = semantic_identity(codomain(base)),
-        actual = semantic_identity(policy.mask.space),
-    ))
+    policy.mask.space == codomain(base) || throw(
+        LocalMathValidationError(
+            "a boundary mask must be placed on the relation codomain";
+            stage = :construct, contract = :masked_boundary_space,
+            expected = semantic_identity(codomain(base)),
+            actual = semantic_identity(policy.mask.space),
+        )
+    )
     _validate_boundary_policy(base, policy.fallback)
     return nothing
 end
 function _validate_boundary_policy(base::Relation, policy::GhostBoundary{D}) where {D}
-    length(size(codomain(base))) == D || throw(LocalMathValidationError(
-        "ghost depth does not match the relation dimensionality";
-        stage = :construct, contract = :ghost_boundary_dimension,
-        expected = length(size(codomain(base))), actual = D,
-    ))
+    length(size(codomain(base))) == D || throw(
+        LocalMathValidationError(
+            "ghost depth does not match the relation dimensionality";
+            stage = :construct, contract = :ghost_boundary_dimension,
+            expected = length(size(codomain(base))), actual = D,
+        )
+    )
     padded = ntuple(
         axis -> size(codomain(base))[axis] + policy.lower[axis] +
             policy.upper[axis],
@@ -599,15 +653,17 @@ Declare storage-free bounded evaluator-provided routing using one-based
 `Int32` or `UInt32` keys. Key zero denotes absence.
 """
 function RuntimeRelation(
-        pair::Pair{<:Space,<:Space}; degree_bound::Integer,
+        pair::Pair{<:Space, <:Space}; degree_bound::Integer,
         key_type::Type{K}, ownership::Symbol = :local,
         id::UUIDs.UUID = _new_semantic_identity(), schema_epoch::Integer = 0,
     ) where {K}
-    K in (Int32, UInt32) || throw(LocalMathValidationError(
-        "a runtime relation currently uses one-based Int32/UInt32 ordinal keys";
-        stage = :construct, contract = :runtime_relation_key_type,
-        expected = (Int32, UInt32), actual = K,
-    ))
+    K in (Int32, UInt32) || throw(
+        LocalMathValidationError(
+            "a runtime relation currently uses one-based Int32/UInt32 ordinal keys";
+            stage = :construct, contract = :runtime_relation_key_type,
+            expected = (Int32, UInt32), actual = K,
+        )
+    )
     representation = _RuntimeRelation{K}(
         _checked_semantic_int(
             degree_bound, :runtime_relation_degree; positive = true
@@ -618,13 +674,13 @@ function RuntimeRelation(
     return _relation(pair, representation; id, schema_epoch)
 end
 
-_index_key_degree(::Type{K}) where {K<:Integer} = 1
-function _index_key_degree(::Type{K}) where {K<:Tuple}
+_index_key_degree(::Type{K}) where {K <: Integer} = 1
+function _index_key_degree(::Type{K}) where {K <: Tuple}
     types = fieldtypes(K)
     !isempty(types) && all(T -> T <: Integer && T !== Bool, types) || return 0
     return length(types)
 end
-function _index_key_degree(::Type{K}) where {K<:StaticArrays.StaticVector}
+function _index_key_degree(::Type{K}) where {K <: StaticArrays.StaticVector}
     eltype(K) <: Integer && eltype(K) !== Bool || return 0
     return length(K)
 end
@@ -639,16 +695,18 @@ lane degree. Strict relations reject out-of-range keys during execution,
 whereas optional relations expose those lanes as absent samples.
 """
 function IndexRelation(
-        pair::Pair{<:Field,<:Space}; optional::Bool = false,
+        pair::Pair{<:Field, <:Space}; optional::Bool = false,
         id::UUIDs.UUID = _new_semantic_identity(), schema_epoch::Integer = 0,
     )
     keys = first(pair)
     degree = _index_key_degree(eltype(keys))
-    1 <= degree <= 32 || throw(LocalMathValidationError(
-        "IndexRelation keys must be integer scalars or fixed-width integer tuples/static vectors";
-        stage = :construct, contract = :index_relation_key_type,
-        expected = :bounded_integer_key, actual = eltype(keys),
-    ))
+    1 <= degree <= 32 || throw(
+        LocalMathValidationError(
+            "IndexRelation keys must be integer scalars or fixed-width integer tuples/static vectors";
+            stage = :construct, contract = :index_relation_key_type,
+            expected = :bounded_integer_key, actual = eltype(keys),
+        )
+    )
     representation = _FieldIndexRelation(keys, degree, optional)
     return _relation(keys.space => last(pair), representation; id, schema_epoch)
 end
@@ -659,12 +717,14 @@ function MaskedRelation(
         id::UUIDs.UUID = _new_semantic_identity(),
         schema_epoch::Integer = schema_epoch(base),
     )
-    mask.space == domain(base) || throw(LocalMathValidationError(
-        "a source mask must be placed on the base relation domain";
-        stage = :construct, contract = :masked_relation_domain,
-        expected = semantic_identity(domain(base)),
-        actual = semantic_identity(mask.space),
-    ))
+    mask.space == domain(base) || throw(
+        LocalMathValidationError(
+            "a source mask must be placed on the base relation domain";
+            stage = :construct, contract = :masked_relation_domain,
+            expected = semantic_identity(domain(base)),
+            actual = semantic_identity(mask.space),
+        )
+    )
     return _relation(
         domain(base) => codomain(base),
         _MaskedRelation(base, mask, degree_bound(base)); id, schema_epoch,
@@ -677,12 +737,14 @@ function SelectedRelation(
         id::UUIDs.UUID = _new_semantic_identity(),
         schema_epoch::Integer = max(schema_epoch(base), schema_epoch(injection)),
     )
-    codomain(injection) == domain(base) || throw(LocalMathValidationError(
-        "a selection injection must map its selected Space into the base domain";
-        stage = :construct, contract = :selected_relation_injection,
-        expected = semantic_identity(domain(base)),
-        actual = semantic_identity(codomain(injection)),
-    ))
+    codomain(injection) == domain(base) || throw(
+        LocalMathValidationError(
+            "a selection injection must map its selected Space into the base domain";
+            stage = :construct, contract = :selected_relation_injection,
+            expected = semantic_identity(domain(base)),
+            actual = semantic_identity(codomain(injection)),
+        )
+    )
     degree = _checked_semantic_product(
         (degree_bound(injection), degree_bound(base)),
         :selected_relation_degree,
@@ -723,7 +785,7 @@ Declare generation-qualified mutable packed topology with an explicit degree
 bound and total endpoint capacity.
 """
 function PackedRelation(
-        pair::Pair{<:Space,<:Space}; degree_bound::Integer,
+        pair::Pair{<:Space, <:Space}; degree_bound::Integer,
         capacity::Integer, layout::Symbol = :bounded_columns,
         ownership::Symbol = :local,
         id::UUIDs.UUID = _new_semantic_identity(), schema_epoch::Integer = 0,
@@ -751,7 +813,7 @@ end
 mutable struct _RelationProofSeal end
 const _RELATION_PROOF_SEAL = _RelationProofSeal()
 
-struct _ValidatedRelationEvidence{B,M,C,O,H}
+struct _ValidatedRelationEvidence{B, M, C, O, H}
     bounds::B
     multiplicity::M
     coverage::C
@@ -761,17 +823,19 @@ struct _ValidatedRelationEvidence{B,M,C,O,H}
     function _ValidatedRelationEvidence(
             seal::_RelationProofSeal, bounds::B, multiplicity::M, coverage::C,
             canonical_order::O, footprint::H,
-        ) where {B,M,C,O,H}
-        seal === _RELATION_PROOF_SEAL || throw(ArgumentError(
-            "validated relation evidence requires the planner-owned seal"
-        ))
-        return new{B,M,C,O,H}(
+        ) where {B, M, C, O, H}
+        seal === _RELATION_PROOF_SEAL || throw(
+            ArgumentError(
+                "validated relation evidence requires the planner-owned seal"
+            )
+        )
+        return new{B, M, C, O, H}(
             bounds, multiplicity, coverage, canonical_order, footprint,
         )
     end
 end
 
-struct RelationProof{S,E}
+struct RelationProof{S, E}
     relation_id::UUIDs.UUID
     domain_id::UUIDs.UUID
     codomain_id::UUIDs.UUID
@@ -783,10 +847,12 @@ struct RelationProof{S,E}
             seal::_RelationProofSeal, relation::Relation,
             binding_schema::S, evidence::_ValidatedRelationEvidence,
         ) where {S}
-        seal === _RELATION_PROOF_SEAL || throw(ArgumentError(
-            "RelationProof construction requires the planner-owned seal"
-        ))
-        return new{S,typeof(evidence)}(
+        seal === _RELATION_PROOF_SEAL || throw(
+            ArgumentError(
+                "RelationProof construction requires the planner-owned seal"
+            )
+        )
+        return new{S, typeof(evidence)}(
             semantic_identity(relation),
             semantic_identity(domain(relation)),
             semantic_identity(codomain(relation)),
