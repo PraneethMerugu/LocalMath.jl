@@ -86,6 +86,12 @@ scratch, and a lifetime wholly contained by one pointwise segment is forwarded
 without writing that scratch. Ordinary user Fields remain explicitly bound and
 observable.
 
+An `OrderedFold` stage with a closed `Control` gate does not evaluate or order
+events, run its recurrence, or publish its initializer over the retained
+destination. This holds for parameter gates and gates produced by a preceding
+total Field publication. Opening the gate restores ordinary ordered-fold
+validation, including rejection of duplicate ordering identities.
+
 ## Bounded scalar operators
 
 `LocalMath.fold` names the mathematical action and takes an already bounded
