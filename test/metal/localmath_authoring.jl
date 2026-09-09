@@ -30,16 +30,27 @@ struct LocalMathMetalNode end
     static_law = LocalMath.@localmath i ∈ cells begin
         static_output[i] = static_input[i]
     end
-    static_source = StaticVector[
-        StaticVector(Float32(i), Float32(i + 1)) for i in 1:4]
+    static_source_parent = StaticVector[
+        StaticVector(Float32(i), Float32(i + 1)) for i in 1:8]
+    static_source_view = @view static_source_parent[1:2:7]
+    static_source = collect(static_source_view)
     # This case qualifies cold structured allocation only; SVector field
     # execution is intentionally outside the reviewed Metal storage operations.
     static_bound = LocalMath.bind(static_law,
-        static_input => LocalMath.Allocate(static_source),
+        static_input => LocalMath.Allocate(static_source_view),
         static_output => LocalMath.Allocate(undef);
         backend)
+    static_source_parent[1] = StaticVector(-1.0f0, -2.0f0)
     @test Array(LocalMath.storage(static_bound, static_input)) == static_source
+    @test LocalMath.storage(static_bound, static_input) !== static_source_view
     @test size(LocalMath.storage(static_bound, static_output)) == (4,)
+    device_source = Metal.MtlArray(static_source)
+    device_bound = LocalMath.bind(static_law,
+        static_input => LocalMath.Allocate(device_source),
+        static_output => LocalMath.Allocate(undef);
+        backend)
+    @test Array(LocalMath.storage(device_bound, static_input)) == static_source
+    @test LocalMath.storage(device_bound, static_input) !== device_source
 
     source = LocalMath.Space(LocalMathMetalNode, 3)
     destination = LocalMath.Space(LocalMathMetalNode, 2)

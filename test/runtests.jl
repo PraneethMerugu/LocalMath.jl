@@ -74,6 +74,7 @@ const LOCALMATH_TEST_SUITE = Dict{String, Expr}(
                 :apply_type,
                 :checked_mul,
                 :code_typed_by_type,
+                :copyto!,
                 :datatype_alignment,
                 :device,
                 :functional,

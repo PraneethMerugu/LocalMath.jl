@@ -77,8 +77,21 @@ end
 
 function _copy_allocated_array(backend, source::AbstractArray)
     destination = _allocate_array(backend, eltype(source), size(source))
-    copyto!(destination, source)
-    KernelAbstractions.synchronize(backend)
+    if backend isa KernelAbstractions.CPU
+        copyto!(destination, source)
+        return destination
+    end
+    # Backend copies intentionally accept a narrower set of physical arrays
+    # than LocalMath's public Allocate contract. Materialize an unsupported
+    # host view before crossing that boundary; supported device-to-device and
+    # dense host transfers retain the backend's native copy path.
+    transfer_source = applicable(
+        KernelAbstractions.copyto!, backend, destination, source
+    ) ? source : Array(Adapt.adapt(KernelAbstractions.CPU(), source))
+    GC.@preserve destination transfer_source begin
+        KernelAbstractions.copyto!(backend, destination, transfer_source)
+        KernelAbstractions.synchronize(backend)
+    end
     return destination
 end
 
