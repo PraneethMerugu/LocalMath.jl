@@ -39,7 +39,8 @@ output_array = LocalMath.storage(prepared, output)
 ```
 
 `allocate(value)` fills a Field when `value` has its exact element type;
-`allocate(source)` copies an exact-shape source array to independent backend
+`allocate(source)` copies an exact-shape source array, including an ordinary
+host array view on the qualified CPU and Metal paths, to independent backend
 storage; and `allocate()` creates the exact bounded storage for a produced
 Collection. A caller-owned `StructArray` is borrowed unchanged. Allocating one
 copies its component arrays recursively and preserves the record layout.

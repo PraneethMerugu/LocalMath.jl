@@ -47,6 +47,15 @@ end
     source[1] = 99f0
     @test input_storage[1] == 1f0
 
+    source_view = @view source[2:-1:1, :]
+    view_bound = LMA.bind(law,
+        input => LMA.Allocate(source_view),
+        output => LMA.Allocate(undef); backend)
+    @test LMA.storage(view_bound, input) == source_view
+    @test LMA.storage(view_bound, input) !== source_view
+    source[2] = 88f0
+    @test LMA.storage(view_bound, input)[1] == 2f0
+
     prepared = LMA.prepare(law,
         input => source, output => LMA.Allocate(undef); backend)
     @test LMA.storage(prepared.plan, input) === source
