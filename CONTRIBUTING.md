@@ -91,6 +91,16 @@ Ordered-fold participation and publication are owned by
 retained destinations, and unchanged duplicate-order rejection through the
 ordinary CPU and Metal inventories.
 
+Field-derived control dependencies are owned by `src/stage_planning.jl`.
+Its publication-totality predicate recognizes `Unique` with `TotalCoverage`
+and `Reduce` with `IdentitySeed`, and rejects whole-stage-gated producers.
+Prefix, mask, and subset controls filter contributions rather than bypassing
+successful publication. An identity-seeded reduction initializes every
+destination even when no source contributes; `ExistingSeed` cannot establish
+a freshly produced control value. `test/fixtures/reduction_control_contracts.jl`
+checks open, closed, and no-contribution gate production plus rejection of
+existing-value seeds through the ordinary CPU and Metal inventories.
+
 Pointwise traversal and its control checks are owned by
 `src/execution/candidate_stage.jl`. The shared fixture
 `test/fixtures/empty_pointwise_contracts.jl` checks empty-domain preparation,

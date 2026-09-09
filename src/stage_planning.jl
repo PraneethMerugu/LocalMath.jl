@@ -280,15 +280,21 @@ end
 _stage_slot_projection(bound::_BoundLaw, stage::Stage) =
     _stage_slot_projection(bound.binding, bound.law.parameters, stage)
 
+_publication_is_total(law) = false
+_publication_is_total(law::Unique) = law.coverage isa TotalCoverage
+_publication_is_total(law::Reduce) = law.seed isa IdentitySeed
+
 function _stage_publishes_field(
         stage::Stage, field::Field; total::Bool = false,
     )
+    total && !(stage.control.gate isa _NoGate) && return false
     for publication in stage.publications
         if publication.law isa OrderedFold
             for component in values(publication.law.state.components)
                 semantic_identity(component.target) == semantic_identity(field) ||
                     continue
-                component.target == field || throw(LocalMathValidationError(
+                component.target == field || throw(
+                    LocalMathValidationError(
                     "a fold target Field identity has conflicting schema";
                     stage = :plan, contract = :field_dependency_schema,
                     expected = field, actual = component.target,
@@ -307,7 +313,7 @@ function _stage_publishes_field(
                 stage = :plan, contract = :field_dependency_schema,
                 expected = field, actual = component.field,
             ))
-            !total || publication.law.coverage isa TotalCoverage || return false
+            !total || _publication_is_total(publication.law) || return false
             return true
         end
     end
