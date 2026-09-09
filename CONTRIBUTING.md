@@ -135,29 +135,36 @@ julia --project=docs -e 'using Pkg; Pkg.instantiate()'
 julia --project=docs docs/make.jl
 ```
 
-The manual executes bounded serial Wortel and Merks integration programs. The
-separate Makie package and backend suites exercise rendering; the published-
-model documentation does not claim to render figures or reproduce the papers.
+The manual executes LocalMath examples for relations, storage, scientific
+recipes and domain compilers. Complete CPM models belong to PottsModels;
+visualization belongs to MakiePotts.
 
 ## Continuous integration
 
-Pull requests target the four package suites, independently runnable
-integration families, applicable platform installation smokes, and the active
-documentation build. Real-GPU hardware tests are manual commands when suitable
-hardware is available; the hosted workflow does not currently provide Metal
-hardware. Benchmarks remain diagnostic and are run when their measured path
-changes.
+Every pull request runs the complete owning package suite and strict manual
+build. Scientific and real-Metal checks run unless the whole PR diff contains
+only the explicitly listed non-executable prose/metadata paths. Unknown paths,
+executable documentation, source, tests, examples and dependency/workflow changes
+retain the broader checks. Manual dispatch and main pushes run those checks too.
+The workflow records the selected checkout revision; dispatch can select a
+candidate branch without changing main. Ordinary dependency compatibility stays
+broad rather than becoming an exact-replay claim.
+
+Hosted `macos-15` runners execute the Metal suite, which rejects unavailable
+hardware. PRs run the macOS API smoke; main and manual runs use the complete
+macOS suite instead of duplicating that smoke. Benchmarks remain diagnostic
+and run when their measured path changes.
 
 Run real-Metal semantic tests independently from performance measurements:
 
 ```sh
-julia --project=benchmark/backends/metal --startup-file=no benchmark/backends/metal/runtests.jl
+julia --project=test/metal --startup-file=no -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate(); include("test/metal/runtests.jl")'
 ```
 
-The runner includes the active semantic, parity, lifecycle, native-component,
-and extension-load witnesses; performance campaigns remain separate. Use the repository Julia version for these commands. The root `.julia-version`,
-root manifest, and Metal manifest all select Julia 1.12.6; do not invoke the
-Metal environment through a separate Julia release channel.
+The runner includes LocalMath stage, publication, correctness and scientific
+recipe witnesses; performance campaigns remain separate. Use Julia 1.12.6 for
+this Metal profile. The runner owns the test inventory; do not duplicate it in
+a separate orchestration script.
 
 Current specifications and decisions live under `spec/`. Historical interviews and evidence under
 `design/audits/`, and retired qualification scripts under `scripts/archive/`, document earlier

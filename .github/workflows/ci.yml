@@ -17,6 +17,35 @@ env:
   JULIA_VERSION: '1.12.6'
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      execution: ${{ steps.diff.outputs.execution }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with: {fetch-depth: 0}
+      - name: Select execution checks from the whole PR diff
+        id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          execution=true
+          if [[ "$EVENT" == pull_request ]] && git cat-file -e "$BASE^{commit}" && git cat-file -e "$HEAD^{commit}"; then
+            git diff --no-renames --name-only -z "$BASE...$HEAD" > "$RUNNER_TEMP/localmath-changed-paths"
+            execution=false
+            while IFS= read -r -d '' path; do
+              case "$path" in
+                AGENTS.md|CONTRIBUTING.md|README.md|LICENSE|CITATION.cff|spec/*.md|design/*.md) ;;
+                *) execution=true; break ;;
+              esac
+            done < "$RUNNER_TEMP/localmath-changed-paths"
+          fi
+          printf 'execution=%s\n' "$execution" >> "$GITHUB_OUTPUT"
+          git rev-parse HEAD
+
   package:
     runs-on: ubuntu-latest
     steps:
@@ -28,8 +57,13 @@ jobs:
         run: julia --project=. --startup-file=no -e 'using Pkg; Pkg.instantiate(); Pkg.test(; test_args=["--jobs=2", "--verbose"])'
 
   scientific:
+    needs: changes
+    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.execution != 'false')
     runs-on: ubuntu-latest
     steps:
+      - name: Require a valid change selection
+        if: needs.changes.result != 'success' || (needs.changes.outputs.execution != 'true' && needs.changes.outputs.execution != 'false')
+        run: exit 1
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: julia-actions/setup-julia@fa02766e078afaaf09b14210362cee14137e6a32 # v3
         with: {version: '${{ env.JULIA_VERSION }}'}
@@ -38,6 +72,7 @@ jobs:
         run: julia --project=test/scientific_witnesses --startup-file=no -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate(); include("test/scientific_witnesses/runtests.jl")'
 
   macos-smoke:
+    if: github.event_name == 'pull_request'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -69,8 +104,13 @@ jobs:
         run: julia --project=docs --startup-file=no -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate(); include("docs/make.jl")'
 
   metal:
+    needs: changes
+    if: always() && (needs.changes.result != 'success' || needs.changes.outputs.execution != 'false')
     runs-on: macos-15
     steps:
+      - name: Require a valid change selection
+        if: needs.changes.result != 'success' || (needs.changes.outputs.execution != 'true' && needs.changes.outputs.execution != 'false')
+        run: exit 1
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: julia-actions/setup-julia@fa02766e078afaaf09b14210362cee14137e6a32 # v3
         with: {version: '${{ env.JULIA_VERSION }}'}
