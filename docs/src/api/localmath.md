@@ -81,6 +81,14 @@ equation namespace:
 These qualified names are stable interfaces, not permission to access other
 underscored LocalMath implementation details.
 
+A Field-derived gate or prefix requires a preceding total publication from a
+Stage without a whole-stage gate. Prefix, mask, and subset controls may filter
+contributions without weakening successful publication totality. `Unique`
+proves publication totality with `TotalCoverage`; `Reduce` proves it with
+`IdentitySeed`, which initializes destinations even when no source contributes.
+`ExistingSeed` retains previous destination state and does not prove a freshly
+produced control value.
+
 `SourcePositionAccess(collection, lane=1)` is a scalar selected-lane access:
 for a producer item it returns the compacted position of that exact emitted
 lane. It is not an array-valued `SourcePositions` API. The producer must request
