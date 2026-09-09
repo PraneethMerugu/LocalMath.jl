@@ -97,6 +97,14 @@ Pointwise traversal and its control checks are owned by
 untouched backing storage, nonempty publication, and runtime-prefix diagnostics
 through the ordinary CPU and Metal inventories.
 
+Canonical collection ordering is owned by
+`src/execution/collect_physical_support.jl`. The shared
+`test/fixtures/collect_canonical_order_contracts.jl` checks reverse tuple-key
+ordering across workgroup boundaries, partial participation, empty gated
+collections, and duplicate-identity failure atomicity on CPU and real Metal.
+Run these checks with `--check-bounds=yes` when changing shared-memory sorting;
+disabled bounds checks must not substitute for correct padded-lane behavior.
+
 Focused commands shorten the edit loop; they are not a second test inventory
 or release gate. Before handoff, run the complete suite of every changed
 package. Add the integration suite when a package boundary, extension, SciML
