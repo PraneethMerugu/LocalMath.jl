@@ -2,6 +2,7 @@ using Test
 using Metal
 using LocalMath
 import KernelAbstractions
+import StaticArrays: SMatrix, SVector
 
 const LMSP = LocalMath
 
@@ -12,6 +13,12 @@ struct StageProgramStageProgramNode end
 struct StageProgramParameterizedContribution end
 @inline (::StageProgramParameterizedContribution)(item::Int32, reads, parameters) =
     (value = LMSP.Contribution(item * getfield(parameters, 1)),)
+
+struct StageProgramFixedValueContribution{T}
+    value::T
+end
+@inline (evaluator::StageProgramFixedValueContribution)(item::Int32, reads, parameters) =
+    (value = LMSP.Contribution(evaluator.value),)
 
 struct StageProgramParameterizedCollect end
 @inline (::StageProgramParameterizedCollect)(item::Int32, reads, parameters) =
@@ -169,6 +176,36 @@ function stage_program_stage_program_reduce(backend)
         for destination in 1:destinations]
     return Array(storage), expected, prepared, generation,
         validated_generation, relation_status
+end
+
+function stage_program_fixed_value_reduce(backend)
+    return map((
+        SVector(1.0f0, -1.0f0),
+        SMatrix{2, 2}(1.0f0, -1.0f0, 2.0f0, -2.0f0),
+    )) do value
+        source = LMSP.Space(StageProgramStageProgramNode, 3)
+        destination = LMSP.Space(StageProgramStageProgramNode, 1)
+        output = LMSP.Field(destination, typeof(value))
+        relation = LMSP.FixedRelation(source => destination; degree = 1)
+        law = LMSP.Reduce(typeof(value), +;
+            seed = LMSP.IdentitySeed(zero(value)),
+            order = LMSP.CanonicalLeftFold())
+        publication = LMSP.Publication((LMSP.FieldPublication(
+            output, relation, LMSP.PublicationValue(:value)),), law)
+        stage = LMSP.Stage(source, NamedTuple(), (publication,),
+            LMSP.Evaluator(StageProgramFixedValueContribution(value)),
+            LMSP.Control(), LMSP.SourceOrigin(@__FILE__, @__LINE__;
+                label = :metal_fixed_value_reduce))
+        storage = Metal.MtlArray(fill(zero(value), 1))
+        endpoints = Metal.MtlArray(reshape(fill(Int32(1), 3), 1, 3))
+        counts = Metal.MtlArray(fill(Int32(1), 3))
+        bound = LMSP._bind_law(LMSP.LocalLaw(stage), LMSP._StructuralBinding(
+            (LMSP._field_storage_binding(output, storage),),
+            (LMSP._relation_storage_binding(relation, (; endpoints, counts)),)))
+        prepared = LMSP.prepare(LMSP.plan(bound; backend))
+        wait(LMSP.execute!(prepared))
+        return (actual = only(Array(storage)), expected = 3.0f0 * value)
+    end
 end
 
 function stage_program_stage_program_collect(backend)
@@ -580,6 +617,13 @@ end
         @test count == Int32[513]
         @test records == Int32.(2 .* (1:513))
         @test LocalMath.inspect(prepared).stages[1].planning.executor === :collect
+    end
+
+    selected in ("all", "fixed_value") &&
+    @testset "immutable fixed-value canonical Reduce" begin
+        for result in stage_program_fixed_value_reduce(backend)
+            @test result.actual == result.expected
+        end
     end
 
     selected in ("all", "projection") &&

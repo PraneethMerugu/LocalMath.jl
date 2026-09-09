@@ -752,7 +752,12 @@ function _ordering_effect_capability(
 end
 
 function _pointwise_surrogate_type(::Type{T}) where {T}
-    if T <: AbstractArray
+    if _storage_value_type(T)
+        # Immutable fixed-shape values are scalar payloads even though Julia's
+        # type hierarchy places StaticArrays below AbstractArray. Preserve the
+        # exact value signature while replacing only physical array storage.
+        return T
+    elseif T <: AbstractArray
         return Array{eltype(T), ndims(T)}
     elseif T <: NamedTuple
         names = T.parameters[1]
