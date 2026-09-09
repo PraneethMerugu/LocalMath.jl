@@ -44,6 +44,13 @@ storage; and `allocate()` creates the exact bounded storage for a produced
 Collection. A caller-owned `StructArray` is borrowed unchanged. Allocating one
 copies its component arrays recursively and preserves the record layout.
 
+`Collect(...; order=canonical_by(key, identity))` orders participating records
+by their keys and identities, including tuple-valued keys. A closed participation
+gate publishes an empty logical collection without rewriting backing records.
+Duplicate canonical identities fail validation before changing the previously
+published count or records. The ordinary CPU and Metal collection-order tests
+exercise these behaviors across partial workgroups with bounds checks enabled.
+
 ## Public surface
 
 Ordinary authoring exports only the mathematical and execution vocabulary:

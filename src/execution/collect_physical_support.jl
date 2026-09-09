@@ -206,8 +206,11 @@ end
                 ascending = ((lane - 1) & sort_size) == 0
                 left = @inbounds local_order[lane]
                 right = @inbounds local_order[other]
-                swap = ascending ? _compacted_ordinal_less(port, workspace, right, left) :
-                    _compacted_ordinal_less(port, workspace, left, right)
+                # Keep one checked key-load call site in this shared-memory loop.
+                first_ordinal = ifelse(ascending, right, left)
+                second_ordinal = ifelse(ascending, left, right)
+                swap = _compacted_ordinal_less(port, workspace,
+                    first_ordinal, second_ordinal)
                 if swap
                     @inbounds begin
                         local_order[lane] = right

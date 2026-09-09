@@ -19,6 +19,19 @@ end
 struct PreparedStageNoInlineIncrement end
 Base.@noinline (::PreparedStageNoInlineIncrement)(value::Int32) =
     value + Int32(1)
+struct PreparedStageUnsafeSineFloat <: AbstractFloat
+    value::Float32
+end
+const PREPARED_STAGE_SINE_MUTATION = Ref(0)
+Base.@noinline function Base.sin(value::PreparedStageUnsafeSineFloat)
+    PREPARED_STAGE_SINE_MUTATION[] += 1
+    return value
+end
+prepared_stage_sine(value) = sin(value)
+struct PreparedStageUnaryFloat{F}
+    operation::F
+end
+(evaluator::PreparedStageUnaryFloat)(value) = evaluator.operation(value)
 struct PreparedStageNoInlineCapture
     values::Vector{Int32}
 end
@@ -115,6 +128,31 @@ end
         Tuple{Int32}, method_signature -> length(method_signature) == 2
     )
     @test !unsafe.qualified
+
+    # A Base function name does not make user-defined methods pure, even
+    # when the argument is isbits and the return type is unchanged.
+    unsafe_sine = LMPRE._closed_callable_effect_analysis(
+        prepared_stage_sine, Tuple{PreparedStageUnsafeSineFloat},
+        method_signature -> length(method_signature) == 2,
+    )
+    @test !unsafe_sine.qualified
+    @test PREPARED_STAGE_SINE_MUTATION[] == 0
+    unsafe_captured_sine = LMPRE._closed_callable_effect_analysis(
+        PreparedStageUnaryFloat(sin), Tuple{PreparedStageUnsafeSineFloat},
+        method_signature -> length(method_signature) == 2,
+    )
+    @test !unsafe_captured_sine.qualified
+    @test PREPARED_STAGE_SINE_MUTATION[] == 0
+
+    for operation in (sin, cos, log, sqrt), type in (Float16, Float32, Float64)
+        unary = LMPRE._closed_callable_effect_analysis(
+            PreparedStageUnaryFloat(operation), Tuple{type},
+            method_signature -> length(method_signature) == 2,
+        )
+        @test unary.qualified
+        @test unary.return_type === type
+    end
+    @test PREPARED_STAGE_SINE_MUTATION[] == 0
 end
 
 @testset "descriptor-free prepared Stage ABI" begin
