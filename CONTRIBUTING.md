@@ -107,8 +107,9 @@ disabled bounds checks must not substitute for correct padded-lane behavior.
 
 Closed callable admission is owned by
 `src/execution/stage_program_kernelabstractions.jl`. Its narrowly enumerated
-pure unary floating-point calls require a method owned by `Base.Math`, a
-concrete `AbstractFloat` argument and the same return type. Extensions undergo
+pure unary floating-point calls use public method reflection to require the same
+Base-owned native math module as the Float64 method, a concrete `AbstractFloat`
+argument and the same return type. Extensions undergo
 ordinary recursive effect analysis; this does not admit arbitrary foreign calls.
 `test/fixtures/trigonometric_stage_contracts.jl` exercises real sine/cosine
 publication through ordinary CPU and Metal stages, while

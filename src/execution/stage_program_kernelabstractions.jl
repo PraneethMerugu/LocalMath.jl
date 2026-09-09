@@ -379,16 +379,27 @@ function _pointwise_residual_invoke_safe(
         return false
     end
     selected === method_instance.def || return false
-    if selected.module === Base.Math && any(
+    if any(
             candidate -> candidate === binding,
             _POINTWISE_PURE_UNARY_FLOAT_INVOKES
         )
-        length(signature.parameters) == 1 || return false
-        argument_type = only(signature.parameters)
-        argument_type isa DataType &&
-            argument_type <: AbstractFloat &&
-            isconcretetype(argument_type) || return false
-        return code_instance.rettype === argument_type
+        # Derive the native math owner through public method reflection. An
+        # extension replacing the Float64 reference must not grant its module
+        # the intrinsic shortcut for other floating-point types.
+        native_owner = try
+            parentmodule(binding, Tuple{Float64})
+        catch
+            nothing
+        end
+        if native_owner isa Module && parentmodule(native_owner) === Base &&
+                selected.module === native_owner
+            length(signature.parameters) == 1 || return false
+            argument_type = only(signature.parameters)
+            argument_type isa DataType &&
+                argument_type <: AbstractFloat &&
+                isconcretetype(argument_type) || return false
+            return code_instance.rettype === argument_type
+        end
     end
     lowered = try
         code_lowered(binding, signature)
