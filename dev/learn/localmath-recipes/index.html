@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Scientific recipes · LocalMath.jl</title><meta name="title" content="Scientific recipes · LocalMath.jl"/><meta property="og:title" content="Scientific recipes · LocalMath.jl"/><meta property="twitter:title" content="Scientific recipes · LocalMath.jl"/><meta name="description" content="Documentation for LocalMath.jl."/><meta property="og:description" content="Documentation for LocalMath.jl."/><meta property="twitter:description" content="Documentation for LocalMath.jl."/><meta property="og:url" content="https://praneethmerugu.github.io/LocalMath.jl/learn/localmath-recipes/"/><meta property="twitter:url" content="https://praneethmerugu.github.io/LocalMath.jl/learn/localmath-recipes/"/><link rel="canonical" href="https://praneethmerugu.github.io/LocalMath.jl/learn/localmath-recipes/"/><script data-outdated-warner src="../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.63.2/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../search_index.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../">LocalMath.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../">Home</a></li><li><a class="tocitem" href="../localmath-quickstart/">Quick start</a></li><li><a class="tocitem" href="../localmath-relations/">Relations and storage</a></li><li class="is-active"><a class="tocitem" href>Scientific recipes</a><ul class="internal"><li><a class="tocitem" href="#1.-Periodic-and-interior-stencils"><span>1. Periodic and interior stencils</span></a></li><li><a class="tocitem" href="#2.-Matrix-free-finite-element-scatter"><span>2. Matrix-free finite-element scatter</span></a></li><li><a class="tocitem" href="#3.-Deterministic-z-buffer-resolution"><span>3. Deterministic z-buffer resolution</span></a></li><li><a class="tocitem" href="#4.-Bounded-grouped-collection-and-consumption"><span>4. Bounded grouped collection and consumption</span></a></li><li><a class="tocitem" href="#5.-Ordered-RSA-recurrence"><span>5. Ordered RSA recurrence</span></a></li></ul></li><li><a class="tocitem" href="../localmath-troubleshooting/">Troubleshooting</a></li><li><a class="tocitem" href="../localmath-domain-compiler/">Domain compilers</a></li><li><a class="tocitem" href="../../api/localmath/">API</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Scientific recipes</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Scientific recipes</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/PraneethMerugu/LocalMath.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="localmath-recipes"><a class="docs-heading-anchor" href="#localmath-recipes">LocalMath scientific recipes</a><a id="localmath-recipes-1"></a><a class="docs-heading-anchor-permalink" href="#localmath-recipes" title="Permalink"></a></h1><p>These modest examples execute during the documentation build. The larger scientific witnesses use the same public builders and compare against independent numerical oracles.</p><h2 id="1.-Periodic-and-interior-stencils"><a class="docs-heading-anchor" href="#1.-Periodic-and-interior-stencils">1. Periodic and interior stencils</a><a id="1.-Periodic-and-interior-stencils-1"></a><a class="docs-heading-anchor-permalink" href="#1.-Periodic-and-interior-stencils" title="Permalink"></a></h2><pre><code class="language-julia hljs">using LocalMath, KernelAbstractions
+backend = KernelAbstractions.CPU()
+cells = Space(6)
+u = Field(cells, Float32)
+periodic_result = Field(cells, Float32)
+interior_result = Field(cells, Float32)
+
+periodic_law = @localmath i ∈ periodic(cells) begin
+    periodic_result[i] = u[i - 1] + u[i + 1]
+end
+interior_law = @localmath i ∈ interior(cells, 1) begin
+    interior_result[i] = u[i - 1] + u[i + 1]
+end
+values = Float32[1, 2, 3, 4, 5, 6]
+periodic_prepared = @prepare (periodic_law; backend) begin
+    u = values
+    periodic_result = allocate(0f0)
+end
+interior_prepared = @prepare (interior_law; backend) begin
+    u = values
+    interior_result = allocate(0f0)
+end
+wait(execute!(periodic_prepared)); wait(execute!(interior_prepared))
+@assert LocalMath.storage(periodic_prepared, periodic_result) == Float32[8,4,6,8,10,6]
+@assert LocalMath.storage(interior_prepared, interior_result) == Float32[0,4,6,8,10,0]
+nothing</code></pre><p>Periodic publication is total. Interior publication is partial, so its output has an explicit initial value.</p><h2 id="2.-Matrix-free-finite-element-scatter"><a class="docs-heading-anchor" href="#2.-Matrix-free-finite-element-scatter">2. Matrix-free finite-element scatter</a><a id="2.-Matrix-free-finite-element-scatter-1"></a><a class="docs-heading-anchor-permalink" href="#2.-Matrix-free-finite-element-scatter" title="Permalink"></a></h2><pre><code class="language-julia hljs">using LocalMath, KernelAbstractions
+backend = KernelAbstractions.CPU()
+elements, nodes = Space(2), Space(5)
+nodal = Field(nodes, Float32)
+residual = Field(nodes, Float32)
+incidence = FixedRelation(elements =&gt; nodes; degree=3)
+law = @localmath e ∈ elements begin
+    x = nodal[incidence(e)]
+    residual[incidence(e)] += (x[1], 2f0*x[2], 3f0*x[3])
+end
+endpoints = Int32[1 3; 2 4; 3 5]
+prepared = @prepare (law; backend) begin
+    nodal = Float32[1,2,3,4,5]
+    residual = zeros(Float32, 5)
+    incidence = endpoints
+end
+wait(execute!(prepared))
+@assert LocalMath.storage(prepared, residual) == Float32[1,4,12,8,15]
+nothing</code></pre><p>The deterministic <code>+=</code> publication owns conflict ordering; there is no assembled global matrix.</p><h2 id="3.-Deterministic-z-buffer-resolution"><a class="docs-heading-anchor" href="#3.-Deterministic-z-buffer-resolution">3. Deterministic z-buffer resolution</a><a id="3.-Deterministic-z-buffer-resolution-1"></a><a class="docs-heading-anchor-permalink" href="#3.-Deterministic-z-buffer-resolution" title="Permalink"></a></h2><pre><code class="language-julia hljs">using LocalMath, KernelAbstractions
+backend = KernelAbstractions.CPU()
+fragments, pixels = Space(4), Space(2)
+depth = Field(fragments, Int32); color = Field(fragments, UInt32)
+tie = Field(fragments, UInt32); covered = Field(fragments, Bool)
+output = Field(pixels, UInt32)
+pixel = FixedRelation(fragments =&gt; pixels; degree=1)
+law = @localmath f ∈ fragments begin
+    output[pixel(f)] = resolve_to(;
+        score=depth[f], tie=tie[f], payload=color[f],
+        lower=Int32(-10), upper=Int32(10), onempty=UInt32(0),
+        when=covered[f])
+end
+prepared = @prepare (law; backend) begin
+    depth = Int32[-2,-2,1,0]
+    color = UInt32[0x11,0x22,0x33,0x44]
+    tie = UInt32[9,3,1,2]
+    covered = Bool[true,true,true,false]
+    output = fill(UInt32(0xff), 2)
+    pixel = reshape(Int32[1,1,2,2], 1, 4)
+end
+wait(execute!(prepared))
+@assert LocalMath.storage(prepared, output) == UInt32[0x22,0x33]
+nothing</code></pre><p>Rank selects the smallest depth and the explicit tie selects the smallest identity among equal depths.</p><h2 id="4.-Bounded-grouped-collection-and-consumption"><a class="docs-heading-anchor" href="#4.-Bounded-grouped-collection-and-consumption">4. Bounded grouped collection and consumption</a><a id="4.-Bounded-grouped-collection-and-consumption-1"></a><a class="docs-heading-anchor-permalink" href="#4.-Bounded-grouped-collection-and-consumption" title="Permalink"></a></h2><pre><code class="language-julia hljs">using LocalMath, KernelAbstractions
+@inline function sum_records(records)
+    total = Int32(0)
+    for record in records
+        total += record[2]
+    end
+    total
+end
+backend = KernelAbstractions.CPU()
+particles, cells = Space(4), Space(2)
+cell_key = Field(particles, Int32); mass = Field(particles, Int32)
+records = Collection(Tuple{Int32,Int32}, 4)
+cell_mass = Field(cells, Int32)
+law = @localmath begin
+    @stage group(p ∈ particles) begin
+        records[p] = bounded_collect((cell_key[p], mass[p]);
+            maximum=1, group=cell_key[p], groups=2)
+    end
+    @stage consume(c ∈ cells) begin
+        local_records = bounded(records[c]; maximum=3)
+        cell_mass[c] = sum_records(local_records)
+    end
+end
+prepared = @prepare (law; backend) begin
+    cell_key = Int32[1,2,1,1]
+    mass = Int32[2,5,7,3]
+    records = allocate()
+    cell_mass = allocate(undef)
+end
+wait(execute!(prepared))
+@assert LocalMath.storage(prepared, cell_mass) == Int32[12,5]
+nothing</code></pre><p>The total capacity, per-source emission width, group count, and consumer bound are distinct explicit contracts.</p><h2 id="5.-Ordered-RSA-recurrence"><a class="docs-heading-anchor" href="#5.-Ordered-RSA-recurrence">5. Ordered RSA recurrence</a><a id="5.-Ordered-RSA-recurrence-1"></a><a class="docs-heading-anchor-permalink" href="#5.-Ordered-RSA-recurrence" title="Permalink"></a></h2><pre><code class="language-julia hljs">using LocalMath, KernelAbstractions
+backend = KernelAbstractions.CPU()
+events, sites = Space(3), Space(4)
+first_site = Field(events, Int32); second_site = Field(events, Int32)
+label = Field(events, Int32); ordinal = Field(events, Int32)
+identity = Field(events, UInt32); accepted_initial = Field(events, Int32)
+accepted = Field(events, Int32); occupancy_initial = Field(sites, Int32)
+occupancy = Field(sites, Int32)
+law = @localmath event ∈ events begin
+    first = first_site[event]; second = second_site[event]
+    value = label[event]
+    @ordered (
+        by=(ordinal[event], identity[event]),
+        state=(occupancy =&gt; occupancy_initial,
+               accepted =&gt; accepted_initial),
+    ) begin
+        admitted = occupancy[first] == 0 &amp;&amp; occupancy[second] == 0
+        if admitted
+            occupancy[(first, second)] = (value, value)
+        end
+        accepted[event] = Int32(admitted)
+    end
+end
+prepared = @prepare (law; backend) begin
+    first_site = Int32[2,1,3]; second_site = Int32[3,2,4]
+    label = Int32[2,1,3]; ordinal = Int32[2,1,3]
+    identity = UInt32[20,10,30]
+    accepted_initial = zeros(Int32, 3); accepted = allocate(Int32(0))
+    occupancy_initial = zeros(Int32, 4); occupancy = allocate(Int32(0))
+end
+wait(execute!(prepared))
+@assert LocalMath.storage(prepared, occupancy) == Int32[1,1,3,3]
+@assert LocalMath.storage(prepared, accepted) == Int32[0,1,1]
+nothing</code></pre><p>State reads observe the accumulated canonical prefix, not a snapshot. The production witness also proves that distinction against a sequential oracle.</p><p>For larger D2Q9, LSM, deposition, graph, DEM, FEM, Potts, PGS, and stoichiometry cases, run <code>test/scientific_witnesses/runtests.jl</code> with the repository Julia environment.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../localmath-relations/">« Relations and storage</a><a class="docs-footer-nextpage" href="../localmath-troubleshooting/">Troubleshooting »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.19.0 on <span class="colophon-date" title="Wednesday 9 September 2026 16:06">Wednesday 9 September 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
