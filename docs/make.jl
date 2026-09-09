@@ -40,6 +40,14 @@ makedocs(
     sitename = "LocalMath.jl",
     authors = "Praneeth Merugu",
     modules = [LocalMath],
+    format = Documenter.HTML(
+        prettyurls = true,
+        canonical = "https://praneethmerugu.github.io/LocalMath.jl/",
+        repolink = "https://github.com/PraneethMerugu/LocalMath.jl",
+        edit_link = "main",
+        size_threshold = nothing,
+        size_threshold_warn = nothing,
+    ),
     doctest = true,
     warnonly = false,
     pagesonly = true,
@@ -47,3 +55,15 @@ makedocs(
     remotes = nothing,
     pages = pages,
 )
+
+if get(ENV, "LOCALMATH_DEPLOY_DOCS", "false") == "true"
+    get(ENV, "GITHUB_ACTIONS", "false") == "true" ||
+        error("Documentation deployment is only permitted inside GitHub Actions")
+    get(ENV, "GITHUB_EVENT_NAME", "") == "pull_request" &&
+        error("Documentation deployment is forbidden for pull requests")
+    deploydocs(
+        repo = "github.com/PraneethMerugu/LocalMath.jl.git",
+        devbranch = "main",
+        push_preview = false,
+    )
+end

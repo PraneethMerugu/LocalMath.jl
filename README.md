@@ -97,6 +97,7 @@ prepared runtime. Planning and execution never consume inspection reports.
 
 ## Learn more
 
+- [Published documentation](https://praneethmerugu.github.io/LocalMath.jl/)
 - [Ten-minute quick start](docs/src/learn/localmath-quickstart.md)
 - [Relations and storage](docs/src/learn/localmath-relations.md)
 - [Scientific recipes](docs/src/learn/localmath-recipes.md)

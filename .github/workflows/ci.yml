@@ -94,6 +94,7 @@ jobs:
         run: julia --project=. --startup-file=no -e 'using Pkg; Pkg.instantiate(); Pkg.test(; test_args=["--jobs=2"])'
 
   docs:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
