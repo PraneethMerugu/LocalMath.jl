@@ -38,6 +38,40 @@ law = @localmath (i, j) ∈ interior(cells, 1) begin
 end
 ```
 
+## Structured field values
+
+A field's element type describes one logical value, independently of its spatial
+shape. Immutable named products may combine admitted Boolean, integer, floating,
+tuple, and bounded fixed-array values. Names are compile-time field labels;
+runtime Symbols, pointers, references, and mutable arrays are not numeric leaves.
+
+```@example product_values
+using LocalMath, KernelAbstractions
+
+@inline function advance_record(value)
+    return (active = !value.active, count = value.count + Int32(1),
+        polarity = (value.polarity[1] + 0.5f0, value.polarity[2]))
+end
+
+initial = (active = false, count = Int32(2), polarity = (1.0f0, 2.0f0))
+cells = Space(3)
+before = Field(cells, typeof(initial))
+after = Field(cells, typeof(initial))
+law = @localmath i ∈ cells begin
+    after[i] = advance_record(before[i])
+end
+prepared = prepare(law, before => fill(initial, 3),
+    after => LocalMath.Allocate(undef); backend = KernelAbstractions.CPU())
+wait(execute!(prepared))
+@assert LocalMath.storage(prepared, after) ==
+    fill((active = true, count = Int32(3), polarity = (1.5f0, 2.0f0)), 3)
+nothing
+```
+
+Backend preparation still checks record layout and every leaf's load/store
+support. Field admission does not imply that every reduction, atomic operation,
+arbitrary record size, or numerical type is supported on every device.
+
 ## Fixed mesh and graph topology
 
 Declare the mathematical direction and exact lane bound independently of the

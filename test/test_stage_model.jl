@@ -79,19 +79,25 @@ struct SMForeignBounds <: LMM._ParameterBounds end
         SMScaleEvaluator(values_field)
     )
     @test_throws LMM.LocalMathValidationError LMM.Evaluator(
-        SMArrayCaptureEvaluator(Float32[1, 2]))
+        SMArrayCaptureEvaluator(Float32[1, 2])
+    )
     @test_throws LMM.LocalMathValidationError LMM.Evaluator(
-        SMMutableCaptureEvaluator(Int32(1)))
+        SMMutableCaptureEvaluator(Int32(1))
+    )
 
     unique = LMM.Unique(Float32)
     publication = LMM.Publication(
-        values_field, identity, unique; value = :value)
+        values_field, identity, unique; value = :value
+    )
     component = publication.components[1]
     control = LMM.Control(
-        prefix = count, mask = mask_field, subset = identity, gate = enabled)
-    stage = LMM.Stage(nodes, (value = access,), (publication,),
+        prefix = count, mask = mask_field, subset = identity, gate = enabled
+    )
+    stage = LMM.Stage(
+        nodes, (value = access,), (publication,),
         SMIdentityEvaluator(); parameters = (count, enabled), control,
-        origin = LMM.SourceOrigin(:stage_model_test, 1))
+        origin = LMM.SourceOrigin(:stage_model_test, 1)
+    )
     @test stage.source === nodes
     @test stage.publications == (publication,)
     @test stage.control === control
@@ -122,20 +128,20 @@ struct SMForeignBounds <: LMM._ParameterBounds end
         (kind = :obsolete_shape,), :freshness,
     )
 
-    valid_result = NamedTuple{(:value,),Tuple{LMM.UniqueValue{Float32}}}
+    valid_result = NamedTuple{(:value,), Tuple{LMM.UniqueValue{Float32}}}
     @test LMM._validate_evaluator_result_type((publication,), valid_result) === nothing
     @test_throws LMM.LocalMathValidationError LMM._validate_evaluator_result_type(
         (publication,), Float32
     )
     @test_throws LMM.LocalMathValidationError LMM._validate_evaluator_result_type(
-        (publication,), NamedTuple{(:wrong,),Tuple{LMM.UniqueValue{Float32}}}
+        (publication,), NamedTuple{(:wrong,), Tuple{LMM.UniqueValue{Float32}}}
     )
     @test_throws LMM.LocalMathValidationError LMM._validate_evaluator_result_type(
-        (publication,), NamedTuple{(:value,),Tuple{LMM.UniqueValue{Int32}}}
+        (publication,), NamedTuple{(:value,), Tuple{LMM.UniqueValue{Int32}}}
     )
     @test_throws LMM.LocalMathValidationError LMM._validate_evaluator_result_type(
         (publication,),
-        NamedTuple{(:value,),Tuple{LMM.ConditionalUniqueValue{Float32}}},
+        NamedTuple{(:value,), Tuple{LMM.ConditionalUniqueValue{Float32}}},
     )
 
     field_control = LMM.Control(
@@ -185,11 +191,11 @@ struct SMForeignBounds <: LMM._ParameterBounds end
     @test reduce_publication.law === reduce
     @test LMM._validate_evaluator_result_type(
         (reduce_publication,),
-        NamedTuple{(:value,),Tuple{LMM.Contribution{Float32}}},
+        NamedTuple{(:value,), Tuple{LMM.Contribution{Float32}}},
     ) === nothing
     @test_throws LMM.LocalMathValidationError LMM._validate_evaluator_result_type(
         (reduce_publication,),
-        NamedTuple{(:value,),Tuple{LMM.UniqueValue{Float32}}},
+        NamedTuple{(:value,), Tuple{LMM.UniqueValue{Float32}}},
     )
     @test_throws LMM.LocalMathValidationError LMM.Reduce(
         Float32, SMAdd(); seed = LMM.IdentitySeed(Int32(0)),
@@ -211,11 +217,13 @@ struct SMForeignBounds <: LMM._ParameterBounds end
     resolve_publication = LMM.Publication((component,), resolve)
     @test LMM._validate_evaluator_result_type(
         (resolve_publication,),
-        NamedTuple{(:value,),Tuple{
-            LMM.ResolutionValue{
-                Int32,LMM._CanonicalOrdinal,Float32
-            }
-        }},
+        NamedTuple{
+            (:value,), Tuple{
+                LMM.ResolutionValue{
+                    Int32, LMM._CanonicalOrdinal, Float32,
+                },
+            },
+        },
     ) === nothing
     @test_throws LMM.LocalMathValidationError LMM.Resolve(
         Int32, Float32; lower = Int32(2), upper = Int32(1),
@@ -233,9 +241,11 @@ struct SMForeignBounds <: LMM._ParameterBounds end
     )
     explicit_tie_publication = LMM.Publication((component,), explicit_tie)
     @test LMM._validate_evaluator_result_type(
-        (explicit_tie_publication,), NamedTuple{(:value,),Tuple{
-            LMM.ResolutionValue{Int32,UInt32,Float32}
-        }},
+        (explicit_tie_publication,), NamedTuple{
+            (:value,), Tuple{
+                LMM.ResolutionValue{Int32, UInt32, Float32},
+            },
+        },
     ) === nothing
 
     wrong_space = LMM.Space(SMNode, 4)
@@ -244,8 +254,10 @@ struct SMForeignBounds <: LMM._ParameterBounds end
         values_field, wrong_relation
     )
     @test LMM.Access(values_field, identity).mode isa LMM._RequiredAccess
-    @test LMM.Access(values_field, identity;
-        required = false).mode isa LMM._SampleAccess
+    @test LMM.Access(
+        values_field, identity;
+        required = false
+    ).mode isa LMM._SampleAccess
     @test_throws LMM.LocalMathValidationError LMM.FieldPublication(
         values_field, wrong_relation, LMM.PublicationValue(:value)
     )
@@ -288,7 +300,7 @@ struct SMForeignBounds <: LMM._ParameterBounds end
             SMHostileParameterEvaluator{Ptr{Cvoid}}(),
             SMHostileParameterEvaluator{Base.RefValue{Int32}}(),
             SMHostileParameterEvaluator{
-                NamedTuple{(:label,),Tuple{Int32}}
+                NamedTuple{(:label,), Tuple{Symbol}},
             }(),
             SMHostileParameterEvaluator{typeof(values_field)}(),
         )
@@ -305,7 +317,7 @@ struct SMForeignBounds <: LMM._ParameterBounds end
     @test captured.actual.path == (:evaluator, :values)
     @test_throws MethodError LMM.PublicationValue{1}()
     @test_throws MethodError LMM.Parameter{
-        Int32,SMForeignBounds
+        Int32, SMForeignBounds,
     }(:foreign, SMForeignBounds())
     @test_throws LMM.LocalMathValidationError LMM.Parameter(
         LMM._STAGE_MODEL_SEAL, Int32, :foreign, SMForeignBounds()
@@ -315,9 +327,13 @@ struct SMForeignBounds <: LMM._ParameterBounds end
     @test length(empty_nodes) == 0
     empty_field = LMM.Field(empty_nodes, Float32)
     empty_identity = LMM.IdentityRelation(empty_nodes)
-    empty_publication = LMM.Publication((LMM.FieldPublication(
-        empty_field, empty_identity, LMM.PublicationValue(:empty_value)
-    ),), LMM.Unique(Float32))
+    empty_publication = LMM.Publication(
+        (
+            LMM.FieldPublication(
+                empty_field, empty_identity, LMM.PublicationValue(:empty_value)
+            ),
+        ), LMM.Unique(Float32)
+    )
     empty_stage = LMM.Stage(
         empty_nodes, NamedTuple(), (empty_publication,),
         LMM.Evaluator(SMIdentityEvaluator()), LMM.Control(),

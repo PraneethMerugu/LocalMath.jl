@@ -10,6 +10,8 @@ const LOCALMATH_INCLUDED_TESTS = (
     "test_stage_planning.jl",
     "test_stage_preparation.jl",
     "test_direct_pointwise_stage.jl",
+    "test_empty_pointwise_domains.jl",
+    "test_product_values.jl",
     "test_unique_stage.jl",
     "test_stage_program_lifecycle.jl",
     "test_execution_receipts.jl",
@@ -21,6 +23,7 @@ const LOCALMATH_INCLUDED_TESTS = (
     "test_collect_stage_execution.jl",
     "test_ordered_fold_stage_model.jl",
     "test_ordered_fold_stage_execution.jl",
+    "test_ordered_fold_control.jl",
     "test_stage_failure_barrier.jl",
     "test_stage_collection_binding.jl",
     "test_collection_stage_access.jl",
@@ -91,17 +94,21 @@ const LOCALMATH_TEST_SUITE = Dict{String, Expr}(
                 all_qualified_accesses_are_public =
                     (; ignore = qualified_internal_boundary),
             )
-            @test isempty(Test.detect_ambiguities(
-                LocalMath, Base; recursive = true
-            ))
+            @test isempty(
+                Test.detect_ambiguities(
+                    LocalMath, Base; recursive = true
+                )
+            )
         end
     end,
     "test_runner_inventory" => quote
         @testset "LocalMath test runner inventory" begin
-            discovered = sort(filter(
-                name -> startswith(name, "test_") && endswith(name, ".jl"),
-                readdir(@__DIR__),
-            ))
+            discovered = sort(
+                filter(
+                    name -> startswith(name, "test_") && endswith(name, ".jl"),
+                    readdir(@__DIR__),
+                )
+            )
             @test sort(collect($LOCALMATH_INCLUDED_TESTS)) == discovered
         end
     end,

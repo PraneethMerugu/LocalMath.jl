@@ -82,8 +82,20 @@ the changed behavior. For example, a focused root check can load the shared
 setup explicitly:
 
 ```sh
-julia --project=. --startup-file=no -e 'include("test/setup.jl"); include("test/test_public_api.jl")'
+julia --project=. --startup-file=no -e 'using Test; import LocalMath; include("test/support.jl"); include("test/test_public_api.jl")'
 ```
+
+Ordered-fold participation and publication are owned by
+`src/execution/ordered_fold_stage.jl`. The shared behavioral fixture
+`test/fixtures/ordered_fold_control_contracts.jl` exercises closed/open gates,
+retained destinations, and unchanged duplicate-order rejection through the
+ordinary CPU and Metal inventories.
+
+Pointwise traversal and its control checks are owned by
+`src/execution/candidate_stage.jl`. The shared fixture
+`test/fixtures/empty_pointwise_contracts.jl` checks empty-domain preparation,
+untouched backing storage, nonempty publication, and runtime-prefix diagnostics
+through the ordinary CPU and Metal inventories.
 
 Focused commands shorten the edit loop; they are not a second test inventory
 or release gate. Before handoff, run the complete suite of every changed

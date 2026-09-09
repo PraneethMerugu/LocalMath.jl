@@ -15,17 +15,21 @@ end
 # Stage mechanism.  Keep its admission point beside the other centrally owned
 # mechanism capabilities rather than in a semantic family or planner.
 function _make_provider_lane(backend, storage)
-    throw(LocalMathValidationError(
-        "no centrally admitted provider-lane adapter exists for $(typeof(backend))"
-    ))
+    throw(
+        LocalMathValidationError(
+            "no centrally admitted provider-lane adapter exists for $(typeof(backend))"
+        )
+    )
 end
 
 function _central_make_provider_lane(backend, storage)
     signature = Tuple{typeof(backend), typeof(storage)}
     method = which(_make_provider_lane, signature)
-    method.module === (@__MODULE__) || throw(LocalMathValidationError(
-        "the provider-lane adapter is not centrally admitted"
-    ))
+    method.module === (@__MODULE__) || throw(
+        LocalMathValidationError(
+            "the provider-lane adapter is not centrally admitted"
+        )
+    )
     return invoke(_make_provider_lane, signature, backend, storage)
 end
 
@@ -102,8 +106,10 @@ function _centrally_qualified_stage_record(
         backend, type::Type, operation::Symbol
     )
     _storage_value_type(type) || return false
-    (_centrally_qualified_resolved_record(backend, type) ||
-        _centrally_qualified_wide_resolved_record(backend, type)) ||
+    (
+        _centrally_qualified_resolved_record(backend, type) ||
+            _centrally_qualified_wide_resolved_record(backend, type)
+    ) ||
         return false
     return _record_leaf_capability(backend, type, operation)
 end
@@ -130,10 +136,10 @@ function _centrally_qualified_resolved_record(backend, type::Type)
         offset += sizeof(field_type)
         packed &&
             _centrally_qualified_value_capability(
-                backend, field_type, :load, :global,
-            ) && _centrally_qualified_value_capability(
-                backend, field_type, :store, :global,
-            )
+            backend, field_type, :load, :global,
+        ) && _centrally_qualified_value_capability(
+            backend, field_type, :store, :global,
+        )
     end
     return qualified && offset == sizeof(type)
 end
@@ -162,24 +168,29 @@ function _centrally_qualified_wide_resolved_record(backend, type::Type)
         return false
     sizeof(type) <= _WIDE_RESOLVED_RECORD_MAX_BYTES &&
         Base.datatype_alignment(type) <=
-            _WIDE_RESOLVED_RECORD_MAX_ALIGNMENT || return false
+        _WIDE_RESOLVED_RECORD_MAX_ALIGNMENT || return false
 
     previous_end = 0
     for index in 1:fieldcount(type)
         field_type = fieldtype(type, index)
-        (isprimitivetype(field_type) || field_type <: Enum) || return false
         field_size = sizeof(field_type)
         field_size > 0 || return false
         offset = Base.fieldoffset(type, index)
         offset >= previous_end && offset + field_size <= sizeof(type) ||
             return false
-        storage_type = _resolved_record_leaf_storage_type(field_type)
-        storage_type === Nothing && return false
-        _centrally_qualified_value_capability(
-            backend, storage_type, :load, :global,
-        ) && _centrally_qualified_value_capability(
-            backend, storage_type, :store, :global,
-        ) || return false
+        if isprimitivetype(field_type) || field_type <: Enum
+            storage_type = _resolved_record_leaf_storage_type(field_type)
+            storage_type === Nothing && return false
+            _centrally_qualified_value_capability(
+                backend, storage_type, :load, :global,
+            ) && _centrally_qualified_value_capability(
+                backend, storage_type, :store, :global,
+            ) || return false
+        else
+            _storage_value_type(field_type) &&
+                _centrally_qualified_wide_resolved_record(backend, field_type) ||
+                return false
+        end
         previous_end = offset + field_size
     end
     return true
@@ -198,16 +209,18 @@ end
 
 function _storage_free_value(value)
     _storage_free_type(typeof(value)) || return false
-    return all(index -> _storage_free_value(getfield(value, index)),
-        1:fieldcount(typeof(value)))
+    return all(
+        index -> _storage_free_value(getfield(value, index)),
+        1:fieldcount(typeof(value))
+    )
 end
 
 _pointwise_effect_capability(backend, operation, signature) = false
 _centrally_qualified_pointwise_effects(backend, operation, signature) =
     _storage_free_value(operation) &&
     _package_owned_capability_dispatch(
-        _pointwise_effect_capability, backend, operation, signature
-    ) &&
+    _pointwise_effect_capability, backend, operation, signature
+) &&
     _pointwise_effect_capability(backend, operation, signature)
 
 _ordered_fold_effect_analysis(backend, transition, signature) = (
@@ -233,8 +246,8 @@ _ordering_effect_capability(backend, extractor, signature) = false
 _centrally_qualified_ordering_effects(backend, extractor, signature) =
     _storage_free_value(extractor) &&
     _package_owned_capability_dispatch(
-        _ordering_effect_capability, backend, extractor, signature
-    ) &&
+    _ordering_effect_capability, backend, extractor, signature
+) &&
     _ordering_effect_capability(backend, extractor, signature)
 
 function _device_copy(::KernelAbstractions.CPU, values)
