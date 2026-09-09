@@ -1,5 +1,6 @@
 using Test
 import LocalMath
+import StaticArrays: SMatrix, SVector
 const LMR = LocalMath
 
 struct ReduceStageNode end
@@ -11,6 +12,11 @@ struct ItemContribution end
 struct FloatContribution end
 @inline (::FloatContribution)(item::Int32, reads, parameters) =
     (value = LMR.Contribution(Float32(item)),)
+struct FixedValueContribution{T}
+    value::T
+end
+@inline (evaluator::FixedValueContribution)(item::Int32, reads, parameters) =
+    (value = LMR.Contribution(evaluator.value),)
 struct TwoLaneContribution end
 @inline (::TwoLaneContribution)(item::Int32, reads, parameters) = (
     value = (LMR.Contribution(item),
@@ -76,6 +82,33 @@ end
             endpoints, counts = fill(Int32(1), 3))),)))
     _run_test_candidate!(_prepare_test_candidate(bound))
     @test storage == [RecordContributionValue(UInt32(6), Int32(-6))]
+end
+
+@testset "canonical Reduce preserves immutable fixed values in exact typed IR" begin
+    for value in (
+            SVector(1.0f0, -1.0f0),
+            SMatrix{2, 2}(1.0f0, -1.0f0, 2.0f0, -2.0f0),
+        )
+        source = LMR.Space(ReduceStageNode, 3)
+        destination = LMR.Space(ReduceStageNode, 1)
+        value_type = typeof(value)
+        output = LMR.Field(destination, value_type)
+        relation = LMR.FixedRelation(source => destination; degree = 1)
+        law = LMR.Reduce(value_type, +;
+            seed = LMR.IdentitySeed(zero(value_type)),
+            order = LMR.CanonicalLeftFold())
+        stage = _reduce_test_stage(
+            source, output, relation, law,
+            FixedValueContribution(value))
+        storage = fill(zero(value_type), 1)
+        endpoints = reshape(fill(Int32(1), 3), 1, 3)
+        bound = LMR._bind_law(LMR.LocalLaw(stage), LMR._StructuralBinding(
+            (LMR._field_storage_binding(output, storage),),
+            (LMR._relation_storage_binding(relation, (
+                endpoints, counts = fill(Int32(1), 3))),)))
+        _run_test_candidate!(_prepare_test_candidate(bound))
+        @test storage == [3.0f0 * value]
+    end
 end
 
 @testset "canonical Reduce is the exact item-major lane-minor left fold" begin

@@ -52,6 +52,11 @@ unsafe globals, foreign calls, dynamic dispatch, recursion, and unsupported
 method shapes are rejected. The error reports the callable purpose, analyzed
 signature, selected method when available, and a recovery hint.
 
+Immutable fixed-shape storage values, including `StaticArray` vectors and
+matrices, remain scalar payloads during this analysis. Physical backend arrays
+are replaced by host surrogates; an operation on a fixed value must still infer
+that same fixed value type and satisfy the ordinary closed-effect contract.
+
 Real scalar `sin` and `cos` are available in ordinary evaluators. Their
 native floating-point methods use the same closed pure-call admission as
 `log` and `sqrt`; this is not permission for arbitrary foreign calls or
