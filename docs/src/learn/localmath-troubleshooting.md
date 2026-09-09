@@ -52,6 +52,12 @@ unsafe globals, foreign calls, dynamic dispatch, recursion, and unsupported
 method shapes are rejected. The error reports the callable purpose, analyzed
 signature, selected method when available, and a recovery hint.
 
+Real scalar `sin` and `cos` are available in ordinary evaluators. Their
+native floating-point methods use the same closed pure-call admission as
+`log` and `sqrt`; this is not permission for arbitrary foreign calls or
+side-effecting extensions of those functions. CPU/Metal comparisons use
+numerical tolerances rather than promising identical transcendental bits.
+
 ## Receipt or transaction failure
 
 `execute!` returns a logical `ExecutionReceipt`; call `wait` or `waitall` to

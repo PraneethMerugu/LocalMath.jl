@@ -105,6 +105,15 @@ collections, and duplicate-identity failure atomicity on CPU and real Metal.
 Run these checks with `--check-bounds=yes` when changing shared-memory sorting;
 disabled bounds checks must not substitute for correct padded-lane behavior.
 
+Closed callable admission is owned by
+`src/execution/stage_program_kernelabstractions.jl`. Its narrowly enumerated
+pure unary floating-point calls require a method owned by `Base.Math`, a
+concrete `AbstractFloat` argument and the same return type. Extensions undergo
+ordinary recursive effect analysis; this does not admit arbitrary foreign calls.
+`test/fixtures/trigonometric_stage_contracts.jl` exercises real sine/cosine
+publication through ordinary CPU and Metal stages, while
+`test/test_stage_preparation.jl` retains unsafe-capture/access rejection tests.
+
 Focused commands shorten the edit loop; they are not a second test inventory
 or release gate. Before handoff, run the complete suite of every changed
 package. Add the integration suite when a package boundary, extension, SciML

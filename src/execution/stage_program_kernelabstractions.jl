@@ -295,7 +295,7 @@ const _POINTWISE_FAILURE_ONLY_INVOKES = (
     Base.error, Base.throw_boundserror, Core.throw_inexacterror,
 )
 const _POINTWISE_PURE_UNARY_FLOAT_INVOKES = (
-    Base.log, Base.sqrt, Base.cos,
+    Base.log, Base.sqrt, Base.sin, Base.cos,
 )
 const _POINTWISE_CALL_DEPTH_LIMIT = 32
 const _POINTWISE_AND_INT = getglobal(getglobal(Core, :Intrinsics), :and_int)
@@ -379,8 +379,10 @@ function _pointwise_residual_invoke_safe(
         return false
     end
     selected === method_instance.def || return false
-    if any(candidate -> candidate === binding,
-            _POINTWISE_PURE_UNARY_FLOAT_INVOKES)
+    if selected.module === Base.Math && any(
+            candidate -> candidate === binding,
+            _POINTWISE_PURE_UNARY_FLOAT_INVOKES
+        )
         length(signature.parameters) == 1 || return false
         argument_type = only(signature.parameters)
         argument_type isa DataType &&
@@ -500,6 +502,11 @@ function _pointwise_concrete_callable_invoke_safe(
     callable_type = first(spec.parameters)
     observed_type = _pointwise_operand_type(callee, analysis.typed_context)
     observed_type isa Type && observed_type <: callable_type || return false
+    if callee isa Function && Base.issingletontype(callable_type)
+        return _pointwise_residual_invoke_safe(
+            code_instance, callee, analysis, depth
+        )
+    end
     return _pointwise_method_instance_safe(method_instance, analysis, depth)
 end
 

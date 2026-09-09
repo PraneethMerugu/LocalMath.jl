@@ -11,6 +11,7 @@ const LOCALMATH_INCLUDED_TESTS = (
     "test_stage_preparation.jl",
     "test_direct_pointwise_stage.jl",
     "test_empty_pointwise_domains.jl",
+    "test_trigonometric_stages.jl",
     "test_product_values.jl",
     "test_unique_stage.jl",
     "test_stage_program_lifecycle.jl",
