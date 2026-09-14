@@ -114,6 +114,14 @@ destination. This holds for parameter gates and gates produced by a preceding
 total Field publication. Opening the gate restores ordinary ordered-fold
 validation, including rejection of duplicate ordering identities.
 
+An ordered transition returns `FoldStep(updates; valid, witness, halt)`. A
+computed `valid=false` result rejects before that step changes private
+accumulator scratch and reports its `Int32` witness together with the source
+item and canonical position. The stage publishes no accumulator component when
+any step is invalid. Ordinary scientific denial is not a validation failure:
+return a valid step that records the denied disposition and omits the denied
+state change.
+
 ## Bounded scalar operators
 
 `LocalMath.fold` names the mathematical action and takes an already bounded

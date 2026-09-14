@@ -6,7 +6,13 @@ struct _FoldInPlace end
 const _ORDERED_FOLD_MAX_EXTENT = Int(typemax(Int32)) - 1
 const _ORDERED_FOLD_MAX_COMPONENT_UPDATES = 32
 const _ORDERED_FOLD_MAX_TOTAL_UPDATES = 128
-const _ORDERED_FOLD_MAX_STEP_BYTES = 1024
+# The update-plus-halt envelope remains 1024 bytes; validity and its Int32
+# witness add at most eight bytes including alignment to an admitted layout.
+const _ORDERED_FOLD_MAX_UPDATE_AND_HALT_BYTES = 1024
+const _ORDERED_FOLD_VALIDITY_LAYOUT_BYTES = 8
+const _ORDERED_FOLD_MAX_STEP_BYTES =
+    _ORDERED_FOLD_MAX_UPDATE_AND_HALT_BYTES +
+    _ORDERED_FOLD_VALIDITY_LAYOUT_BYTES
 
 """
     FoldComponent(target::Field; from=nothing, in_place=false)
@@ -129,16 +135,24 @@ BoundedWrites(::Type{T}) where {T} =
     BoundedWrites{0, T}((), (), Int32(0))
 
 """
-    FoldStep(updates; halt=false)
+    FoldStep(updates; valid=true, witness=Int32(0), halt=false)
 
 Return one kernel-local ordered-fold step. `updates` is a named tuple whose
 values are [`BoundedWrites`](@ref). Its names are checked against the declared
 accumulator schema during planning; the executor applies components in schema
 order rather than caller tuple order. `halt=true` stops only the later canonical
 prefix and does not imply rollback.
+
+`valid=false` rejects a transition result before any of its updates reach the
+private accumulator scratch. `witness` is an `Int32` diagnostic value reported
+with the existing source-item and canonical-position context. A scientifically
+valid denial should instead return an ordinary valid step whose updates publish
+the denied disposition.
 """
 struct FoldStep{Names, U <: NamedTuple}
     updates::U
+    valid::Bool
+    witness::Int32
     halt::Bool
 end
 
@@ -148,12 +162,14 @@ _fold_writes_tuple(updates::Tuple) =
 
 function FoldStep(
         updates::U;
+        valid::Bool = true,
+        witness::Int32 = Int32(0),
         halt::Bool = false,
     ) where {U <: NamedTuple}
     _fold_writes_tuple(values(updates)) || throw(ArgumentError(
         "FoldStep updates must be a named tuple of BoundedWrites values"
     ))
-    return FoldStep{keys(updates), U}(updates, halt)
+    return FoldStep{keys(updates), U}(updates, valid, witness, halt)
 end
 
 """Validate the shared static ABI for a Stage ordered-recurrence transition.
@@ -191,6 +207,16 @@ function _validate_ordered_fold_step_type(
         "ordered-fold transition halt must be Bool";
         stage, contract = Symbol(prefix, :_halt_type),
         expected = Bool, actual = fieldtype(step_type, :halt),
+    ))
+    fieldtype(step_type, :valid) === Bool || throw(LocalMathValidationError(
+        "ordered-fold transition validity must be Bool";
+        stage, contract = Symbol(prefix, :_valid_type),
+        expected = Bool, actual = fieldtype(step_type, :valid),
+    ))
+    fieldtype(step_type, :witness) === Int32 || throw(LocalMathValidationError(
+        "ordered-fold transition witness must be Int32";
+        stage, contract = Symbol(prefix, :_witness_type),
+        expected = Int32, actual = fieldtype(step_type, :witness),
     ))
     update_names = step_type.parameters[1]
     Set(update_names) == Set(names) || throw(LocalMathValidationError(
@@ -246,3 +272,4 @@ const _ORDERED_FOLD_DUPLICATE_UPDATE = UInt8(3)
 const _ORDERED_FOLD_DUPLICATE_ORDER = UInt8(4)
 const _ORDERED_FOLD_INVALID_VALUE = UInt8(5)
 const _ORDERED_FOLD_EMPTY_INPUT = UInt8(6)
+const _ORDERED_FOLD_INVALID_STEP = UInt8(7)

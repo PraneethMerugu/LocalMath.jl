@@ -6,6 +6,8 @@
   `LocalMath.geometric_mean` methods for bounded relation and Collection views.
 - Gives all bounded reductions explicit result-type, empty-input, absence, and
   canonical-order semantics on the existing transaction-aware executor.
+- Adds a device-safe computed-validity flag and bounded diagnostic witness to
+  `FoldStep`, preserving atomic ordered-state publication on semantic failure.
 
 # LocalMath 0.2.0-rc1
 

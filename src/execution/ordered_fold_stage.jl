@@ -260,7 +260,14 @@ end
             end
         )
     end
-    return Expr(:block, checks..., :((Int32(0), Int32(0), Int32(0))))
+    return Expr(
+        :block,
+        :(!step.valid && return (
+            Int32(_ORDERED_FOLD_INVALID_STEP), Int32(0), step.witness,
+        )),
+        checks...,
+        :((Int32(0), Int32(0), Int32(0))),
+    )
 end
 @inline function _ordered_fold_stage_apply_writes!(storage, writes::BoundedWrites)
     for j in Int32(1):writes.count

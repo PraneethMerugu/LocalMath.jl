@@ -12,6 +12,19 @@ struct OrderedFoldStageTransition end
         (Int32(1),), (value,), Int32(1)),))
 end
 
+@testset "FoldStep validity metadata preserves bounded update capacity" begin
+    value = ntuple(_ -> Int64(0), 10)
+    writes = LMF.BoundedWrites(
+        ntuple(Int32, 12), ntuple(_ -> value, 12), Int32(12))
+    updates = (accumulator = writes,)
+    step = LMF.FoldStep(updates)
+
+    @test sizeof(Tuple{typeof(updates),Bool}) == 1024
+    @test sizeof(step) == 1032
+    @test LMF._validate_ordered_fold_step_type(
+        typeof(step), (:accumulator,), (NTuple{10,Int64},)) === typeof(step)
+end
+
 @testset "OrderedFold is a terminal typed recurrence Stage law" begin
     source = LMF.Space(OrderedFoldStageModelNode, 5)
     state_space = LMF.Space(OrderedFoldStageModelNode, 2)
