@@ -31,7 +31,7 @@
         :one_group, :group_by, :source_order, :canonical_by,
         :persistent_source_position,
         :CompactedStorage, :BoundedGroupView,
-        :Unique, :Reduce, :Resolve, :Collect, :OrderedFold,
+        :Unique, :Reduce, :Resolve, :Collect, :KeyedReduce, :OrderedFold,
         :TotalCoverage, :PartialCoverage, :UnreachableEmpty, :PreserveEmpty,
         :FillEmpty, :IdentitySeed, :ExistingSeed, :CanonicalLeftFold,
         :RelaxedAtomic, :ArgMin, :ArgMax, :CanonicalSourceLaneTie,
@@ -44,7 +44,9 @@
         :UniqueValue, :ConditionalUniqueValue, :RoutedUniqueValue,
         :ConditionalRoutedUniqueValue, :Contribution, :RoutedContribution,
         :ResolutionValue, :RoutedResolutionValue, :CollectedValue,
-        :GroupedCollectedValue, :FoldValue,
+        :GroupedCollectedValue, :KeyedValue, :KeyedContribution, :FoldValue,
+        :NewKeyIdentity,
+        :RetainAllKeys, :DropIdentityKeys,
     ))
     public_qualified = Set(filter(
         name -> Base.ispublic(LocalMath, name) &&
@@ -88,6 +90,11 @@
         LocalMath.GhostBoundary
     @test LocalMath.FoldValue(Int32(3)).value == Int32(3)
     @test LocalMath.Collect(Int32; maximum=1) isa LocalMath.Collect
+    keyed = LocalMath.KeyedValue(UInt32(2), Int32(3))
+    @test (keyed.key, keyed.value) == (UInt32(2), Int32(3))
+    @test !applicable(LocalMath.KeyedValue{Int64,Int32}, Int64(2), Int32(3))
+    @test_throws LocalMath.LocalMathValidationError LocalMath.KeyedValue(
+        Int64(2), Int32(3))
     collection = LocalMath.Collection(Int32, 2)
     @test LocalMath.SourcePositionAccess(collection) isa LocalMath.CollectionAccess
     @test LocalMath.SourcePositionAccess(collection, 2) isa LocalMath.CollectionAccess

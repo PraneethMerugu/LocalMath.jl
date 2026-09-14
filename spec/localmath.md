@@ -19,6 +19,7 @@ Publication laws define observable conflict behavior:
 - reduction applies its declared operation and ordering law;
 - resolution selects a score/payload pair with explicit tie and empty rules;
 - collection publishes bounded records with explicit grouping and overflow;
+- keyed reduction updates bounded sparse exact-key state by a canonical fold;
 - ordered fold applies a bounded recurrence in its declared canonical order.
 
 In authored `resolve_to` expressions, a noncanonical tie is an explicit
@@ -65,6 +66,28 @@ Authored collection consumers use statically bounded group views and literal
 source-position lanes. Collection production distinguishes its global storage
 capacity from the per-source `maximum` emission width. These forms lower to
 the existing `CollectionAccess`, source-position, `Collect`, and control laws.
+
+`KeyedReduce(K, V, operation; seed, ...)` is the narrow
+incremental sparse-state companion to `Collect`. Its sole destination is a
+`Collection{KeyedValue{K,V}}`. `K` is `Int32`, `UInt32`, or a bounded flat
+tuple of those types. The stage-entry collection must contain unique keys.
+Each exact-key segment folds its existing value first when present, then
+participating `KeyedContribution`s in intrinsic `(source item, lane)` left-fold
+order. It has no order selector, hash, registry, relaxed, or provider-specific
+path. `DropIdentityKeys` frees capacity when the final
+value equals the declared identity, while `RetainAllKeys` preserves it.
+Invalid prior count, duplicate prior keys, invalid stage control, and final
+capacity overflow reject the complete publication. Private workspace receives
+all intermediate values; records and the device-resident count publish through
+one validation gate, so failure leaves both unchanged. Workspace is
+`O(capacity + source_count * maximum)` and exact-key sorting followed by
+segmented folding is `O(n log n)` work plus linear scans.
+Its bounded device workspace is allocated by `prepare`; execution performs no
+device allocation. The public host `execute!`/`wait` path still allocates
+receipt, launch, and event bookkeeping shared with other Stage executors, so
+zero host allocation is not part of this contract. The reproducible compiler
+benchmark reports both that shared baseline and the narrower keyed semantic
+boundary rather than treating host orchestration `Any` values as device IR.
 
 Ordered recurrence is authored by declaring a total event order and every
 evolving state component with its exact initial Field:

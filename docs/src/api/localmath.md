@@ -52,6 +52,52 @@ Duplicate canonical identities fail validation before changing the previously
 published count or records. The ordinary CPU and Metal collection-order tests
 exercise these behaviors across partial workgroups with bounds checks enabled.
 
+### Incremental sparse keyed state
+
+`KeyedReduce` updates one bounded keyed `Collection` without introducing a
+second scheduler or storage authority. Prior records are intrinsic input state;
+the required `seed` keyword supplies the initial value only for a key absent at
+stage entry.
+
+```julia
+import KernelAbstractions
+import LocalMath
+
+struct Contact end
+struct ContactDeltas end
+
+@inline function (::ContactDeltas)(contact::Int32, reads, parameters)
+    owner = UInt32(isodd(contact) ? 1 : 2)
+    delta = isodd(contact) ? Int32(1) : Int32(-1)
+    return (; change = LocalMath.KeyedContribution(owner, delta))
+end
+
+contacts = LocalMath.Space(Contact, 4)
+counts = LocalMath.Collection(LocalMath.KeyedValue{UInt32,Int32}, 8)
+stage = LocalMath.Stage(contacts, NamedTuple(), (
+        LocalMath.Publication(counts,
+            LocalMath.KeyedReduce(UInt32, Int32, +;
+                maximum = 1,
+                seed = LocalMath.NewKeyIdentity(Int32(0)),
+                retention = LocalMath.DropIdentityKeys());
+            value = :change),),
+    LocalMath.Evaluator(ContactDeltas()), LocalMath.Control(),
+    LocalMath.SourceOrigin(:contact_counts, 1))
+law = LocalMath.LocalLaw(stage)
+prepared = LocalMath.prepare(law, counts => LocalMath.Allocate();
+    backend = KernelAbstractions.CPU())
+wait(LocalMath.execute!(prepared))
+records = LocalMath.storage(prepared, counts)
+```
+
+Every exact-key segment intrinsically folds an existing value first, then
+participating tuple lanes in canonical `(source, lane)` order. Invalid prior counts, duplicate prior
+keys, and final capacity overflow reject the whole publication, leaving its
+records and logical count unchanged. `prepare` owns the bounded device
+workspace; execution performs no device allocation. Public `execute!` and
+`wait` still allocate shared host receipt/launch bookkeeping, which is tracked
+separately rather than claimed as zero-allocation execution.
+
 ## Public surface
 
 Ordinary authoring exports only the mathematical and execution vocabulary:
@@ -71,11 +117,11 @@ equation namespace:
 |:--|:--|
 | Lifecycle | `Plan`, `PreparedPlan`, `ExecutionReceipt`, `LocalMathValidationError`, `bind`, `plan`, `Allocate`, `Temporary`, `MutableRelationStorage`, `storage`, `inspect`, `compilation_report`, `execution_contract`, `lowering_identity` |
 | Explicit laws | `Stage`, `Publication`, `Access`, `Control`, `SourceOrigin`, `Parameter`, `ParameterSchema`, `Evaluator`, `FieldPublication`, `CollectionPublication`, `FoldPublication`, `PublicationValue`, `sequence` |
-| Collections | `CollectionAccess`, `CollectionCount`, `BoundedGroup`, `SourcePositionAccess`, `CompactedStorage`, `BoundedGroupView`, `one_group`, `group_by`, `source_order`, `canonical_by`, `persistent_source_position` |
-| Publication laws | `Unique`, `Reduce`, `Resolve`, `Collect`, `OrderedFold`, `TotalCoverage`, `PartialCoverage`, `UnreachableEmpty`, `PreserveEmpty`, `FillEmpty`, `IdentitySeed`, `ExistingSeed`, `CanonicalLeftFold`, `RelaxedAtomic`, `ArgMin`, `ArgMax`, `CanonicalSourceLaneTie`, `TieMin`, `TieMax`, `RejectOverflow`, `EmptyCollection` |
+| Collections | `CollectionAccess`, `CollectionCount`, `BoundedGroup`, `SourcePositionAccess`, `CompactedStorage`, `BoundedGroupView`, `KeyedValue`, `one_group`, `group_by`, `source_order`, `canonical_by`, `persistent_source_position` |
+| Publication laws | `Unique`, `Reduce`, `Resolve`, `Collect`, `KeyedReduce`, `OrderedFold`, `TotalCoverage`, `PartialCoverage`, `UnreachableEmpty`, `PreserveEmpty`, `FillEmpty`, `IdentitySeed`, `ExistingSeed`, `NewKeyIdentity`, `RetainAllKeys`, `DropIdentityKeys`, `CanonicalLeftFold`, `RelaxedAtomic`, `ArgMin`, `ArgMax`, `CanonicalSourceLaneTie`, `TieMin`, `TieMax`, `RejectOverflow`, `EmptyCollection` |
 | Ordered state | `FoldComponent`, `InitializedState`, `initialized_state`, `BoundedWrites`, `FoldStep` |
 | Bounded scalar operations | `fold`, `BoundedFold`, `Where`, `RejectInvalid`, `SkipInvalid`, `FillInvalid`, `RejectEmpty`, `RelaxedAssociative`, `BoundedFoldOutcome`, `evaluate_bounded` |
-| Evaluator outputs | `UniqueValue`, `ConditionalUniqueValue`, `RoutedUniqueValue`, `ConditionalRoutedUniqueValue`, `Contribution`, `RoutedContribution`, `ResolutionValue`, `RoutedResolutionValue`, `CollectedValue`, `GroupedCollectedValue`, `FoldValue` |
+| Evaluator outputs | `UniqueValue`, `ConditionalUniqueValue`, `RoutedUniqueValue`, `ConditionalRoutedUniqueValue`, `Contribution`, `RoutedContribution`, `ResolutionValue`, `RoutedResolutionValue`, `CollectedValue`, `GroupedCollectedValue`, `KeyedContribution`, `FoldValue` |
 | Advanced execution | `allocate_workspace`, `submission_capacity`, `ispending`, `success_gate` |
 
 These qualified names are stable interfaces, not permission to access other

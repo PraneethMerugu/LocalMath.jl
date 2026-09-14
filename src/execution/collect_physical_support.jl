@@ -1,10 +1,57 @@
-# Domain-neutral physical primitives shared by the sole Stage Collect executor.
+# Domain-neutral physical primitives shared by compacted Stage executors.
 # This file owns no LocalLaw lowering, topology, phase graph, or alternate output
-# declaration.  Every kernel is launched only by `collect_stage.jl`.
+# declaration. Every kernel is launched only by the sole StageProgram executor.
 
 const _COMPACTED_BLOCK = 256
 
-@inline function _collect_atomic_min!(array, index, value)
+struct _CompactedScanLevel{A}
+    storage::A
+    offset::Int32
+    count::Int32
+end
+Adapt.@adapt_structure _CompactedScanLevel
+Base.length(level::_CompactedScanLevel) = Int(level.count)
+@inline Base.getindex(level::_CompactedScanLevel, index::Integer) =
+    @inbounds level.storage[Int(level.offset) + Int(index)]
+@inline function Base.setindex!(level::_CompactedScanLevel, value, index::Integer)
+    @inbounds level.storage[Int(level.offset) + Int(index)] = value
+    return value
+end
+
+@inline _compacted_scan_level(storage, offset::Int, count::Int) =
+    _CompactedScanLevel(storage, Int32(offset), Int32(count))
+
+function _compacted_scan_storage_lengths(items::Int)
+    prefix_count = 0
+    sums_count = 0
+    current = items
+    while true
+        blocks = max(cld(current, _COMPACTED_BLOCK), 1)
+        prefix_count <= typemax(Int32) - current &&
+            sums_count <= typemax(Int32) - blocks || throw(
+            LocalMathValidationError(
+                "compacted scan workspace exceeds Int32 device addressing";
+                stage = :prepare, contract = :compacted_scan_capacity,
+                expected = 0:typemax(Int32),
+                actual = (prefix_count + current, sums_count + blocks)))
+        prefix_count += current
+        sums_count += blocks
+        current <= _COMPACTED_BLOCK && break
+        current = blocks
+    end
+    return prefix_count, sums_count
+end
+
+@inline function _compacted_scan_level_count(items::Int)
+    levels = 1
+    while items > _COMPACTED_BLOCK
+        items = max(cld(items, _COMPACTED_BLOCK), 1)
+        levels += 1
+    end
+    return levels
+end
+
+@inline function _compacted_atomic_min!(array, index, value)
     Atomix.@atomic min(array[index], value)
     return nothing
 end
@@ -33,6 +80,8 @@ end
     return Expr(:block, expressions..., :(nothing))
 end
 
+@inline _compacted_reconstruct_value(::Type{T}, values...) where {T} = T(values...)
+
 @generated function _compacted_load_value(::Type{T}, storage, index::Int) where {T}
     fieldcount(T) == 0 && return :(@inbounds storage[index])
     values = map(1:fieldcount(T)) do field_index
@@ -42,7 +91,7 @@ end
     end
     T <: Tuple && return Expr(:tuple, values...)
     T <: NamedTuple && return :($T(($(values...),)))
-    return :($T($(values...)))
+    return :(_compacted_reconstruct_value($T, $(values...)))
 end
 
 @inline _compacted_group(::_OneGroup, value) = Int32(1)
@@ -71,15 +120,14 @@ end
         right = @inbounds order[position]
         same_group = workspace.groups === nothing ||
             @inbounds(workspace.groups[left]) == @inbounds(workspace.groups[right])
-        key_type = typeof(port).parameters[5]
-        identity_type = typeof(port).parameters[6]
+        key_type, identity_type = _compacted_order_types(port)
         same_order = _canonical_order_equal(
             _compacted_load_value(key_type, workspace.keys, Int(left)),
             _compacted_load_value(identity_type, workspace.identities, Int(left)),
             _compacted_load_value(key_type, workspace.keys, Int(right)),
             _compacted_load_value(identity_type, workspace.identities, Int(right)))
         same_group && same_order &&
-            _collect_atomic_min!(
+            _compacted_atomic_min!(
                 workspace.duplicate_position, 1, Int32(position - 1))
     end
 end
@@ -140,6 +188,53 @@ end
     end
 end
 
+function _compacted_launch_prefix_scan!(backend, item_counts, prefix_storage,
+        sums_storage)
+    current = length(item_counts)
+    prefix_offset = 0
+    sums_offset = 0
+    blocks = max(cld(current, _COMPACTED_BLOCK), 1)
+    output = _compacted_scan_level(prefix_storage, prefix_offset, current)
+    sums = _compacted_scan_level(sums_storage, sums_offset, blocks)
+    extent = blocks * _COMPACTED_BLOCK
+    _compacted_scan_block_kernel!(backend, _COMPACTED_BLOCK, extent)(
+        item_counts, output, sums, Int32(current); ndrange = extent)
+    prefix_offset += current
+    sums_offset += blocks
+    current = blocks
+    input = sums
+    while current > 1
+        blocks = max(cld(current, _COMPACTED_BLOCK), 1)
+        output = _compacted_scan_level(prefix_storage, prefix_offset, current)
+        sums = _compacted_scan_level(sums_storage, sums_offset, blocks)
+        extent = blocks * _COMPACTED_BLOCK
+        _compacted_scan_block_kernel!(backend, _COMPACTED_BLOCK, extent)(
+            input, output, sums, Int32(length(input)); ndrange = extent)
+        prefix_offset += current
+        sums_offset += blocks
+        current <= _COMPACTED_BLOCK && break
+        current = blocks
+        input = sums
+    end
+    levels = _compacted_scan_level_count(length(item_counts))
+    for level in (levels - 1):-1:1
+        size = length(item_counts)
+        child_offset = 0
+        for prior in 1:(level - 1)
+            child_offset += size
+            size = max(cld(size, _COMPACTED_BLOCK), 1)
+        end
+        parent_size = max(cld(size, _COMPACTED_BLOCK), 1)
+        parent_offset = child_offset + size
+        prefix = _compacted_scan_level(prefix_storage, child_offset, size)
+        parent = _compacted_scan_level(prefix_storage, parent_offset, parent_size)
+        extent = max(length(prefix), 1)
+        _compacted_scan_add_kernel!(backend, min(extent, _COMPACTED_BLOCK), extent)(
+            prefix, parent, Int32(length(prefix)); ndrange = extent)
+    end
+    return nothing
+end
+
 @kernel function _compacted_scatter_kernel!(
         valid, item_counts, item_prefix, order, positions, count,
         ::Val{K}, nitems::Int32
@@ -175,8 +270,7 @@ end
         left_group != right_group && return left_group < right_group
     end
     if workspace.keys !== nothing
-        key_type = typeof(port).parameters[5]
-        identity_type = typeof(port).parameters[6]
+        key_type, identity_type = _compacted_order_types(port)
         comparison = _canonical_order_compare(
             _compacted_load_value(key_type, workspace.keys, Int(left)),
             _compacted_load_value(identity_type, workspace.identities, Int(left)),

@@ -19,6 +19,7 @@ const LOCALMATH_METAL_WITNESSES = (
     "reduction_control.jl",
     "empty_pointwise_domains.jl",
     "collect_canonical_order.jl",
+    "keyed_reduce.jl",
     "trigonometric_stages.jl",
 )
 
