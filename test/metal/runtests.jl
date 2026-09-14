@@ -15,6 +15,7 @@ const LOCALMATH_METAL_WITNESSES = (
     "destination_grouping.jl",
     "product_values.jl",
     "ordered_fold_control.jl",
+    "ordered_fold_step_validation.jl",
     "reduction_control.jl",
     "empty_pointwise_domains.jl",
     "collect_canonical_order.jl",

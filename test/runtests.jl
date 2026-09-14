@@ -26,6 +26,7 @@ const LOCALMATH_INCLUDED_TESTS = (
     "test_collect_canonical_order.jl",
     "test_ordered_fold_stage_model.jl",
     "test_ordered_fold_stage_execution.jl",
+    "test_ordered_fold_step_validation.jl",
     "test_ordered_fold_control.jl",
     "test_stage_failure_barrier.jl",
     "test_stage_collection_binding.jl",

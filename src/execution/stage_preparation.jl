@@ -237,8 +237,13 @@ Base.eltype(::Type{_PreparedFoldRead{T}}) where {T} = T
 Base.length(view::_PreparedFoldRead) = length(getfield(view, :storage))
 Base.size(view::_PreparedFoldRead) = size(getfield(view, :storage))
 Base.axes(view::_PreparedFoldRead) = axes(getfield(view, :storage))
-@inline Base.getindex(view::_PreparedFoldRead, indices...) =
-    @inbounds getfield(view, :storage)[indices...]
+# This call boundary preserves evolving-state loads across writes to the same
+# ordered-fold scratch. Without it Metal hoists constant-index loads out of the
+# recurrence and later canonical steps observe the initializer snapshot.
+Base.@noinline Base.getindex(view::_PreparedFoldRead, index::Int) =
+    @inbounds getfield(view, :storage)[index]
+Base.@noinline Base.getindex(view::_PreparedFoldRead, index::Int32) =
+    @inbounds getfield(view, :storage)[index]
 
 struct _PreparedFoldAccumulatorView{Names,C<:NamedTuple}
     components::C

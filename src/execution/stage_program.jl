@@ -1053,6 +1053,7 @@ function _validated_publication_error(
         code == _ORDERED_FOLD_DUPLICATE_ORDER ? :duplicate_order_identity :
         code == _ORDERED_FOLD_INVALID_VALUE ? :invalid_bounded_value :
         code == _ORDERED_FOLD_EMPTY_INPUT ? :empty_bounded_input :
+        code == _ORDERED_FOLD_INVALID_STEP ? :invalid_step :
         :invalid_failure_class
     component = publication !== nothing &&
         hasproperty(publication.details, :fold_components) &&

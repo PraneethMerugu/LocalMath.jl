@@ -97,6 +97,13 @@ Execution evolves ordered state in package-owned workspace and commits it only
 after final validation succeeds, preserving stage-entry destinations on any
 late recurrence failure.
 
+The explicit transition API may return
+`FoldStep(updates; valid=false, witness=Int32(...))` when its computed result
+violates a domain-owned invariant. The executor reports that bounded witness
+with the event's source item and canonical position before applying the step's
+updates. A normal denied event remains a valid step: it records the denial in
+state and emits zero writes for changes that were not realized.
+
 ## Binding and storage ownership
 
 Ordinary preparation accepts one flat sequence of descriptor-to-storage pairs.
