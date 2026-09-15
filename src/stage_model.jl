@@ -1007,18 +1007,34 @@ struct NewKeyIdentity{V}
     end
 end
 
-"""Retain keys whose reduced value equals the new-key identity."""
+"""Rebuild every emitted key from an exact identity, ignoring stage-entry keys."""
+struct RebuildFromIdentity{V}
+    value::V
+    function RebuildFromIdentity(value::V) where {V}
+        _storage_value_type(V) || throw(LocalMathValidationError(
+            "a keyed rebuild identity requires an admitted storage value type";
+            stage = :construct, contract = :keyed_reduce_identity_type,
+            actual = V))
+        return new{V}(value)
+    end
+end
+
+@inline _keyed_reduce_includes_stage_entry(::NewKeyIdentity) = true
+@inline _keyed_reduce_includes_stage_entry(::RebuildFromIdentity) = false
+
+"""Retain keys whose reduced value equals the keyed-reduction identity."""
 struct RetainAllKeys end
-"""Remove keys whose reduced value equals the new-key identity."""
+"""Remove keys whose reduced value equals the keyed-reduction identity."""
 struct DropIdentityKeys end
 
 """
     KeyedReduce(K, V, operation; maximum=1, seed,
         retention=DropIdentityKeys())
 
-Update one bounded sparse `Collection{KeyedValue{K,V}}`. Stage-entry records
-must have unique exact keys. Existing values are folded before participating
-contributions, followed by contributions in canonical `(source, lane)` order.
+Update or rebuild one bounded sparse `Collection{KeyedValue{K,V}}`.
+`NewKeyIdentity` includes unique stage-entry records before participating
+contributions. `RebuildFromIdentity` ignores stage-entry records. Contributions
+always fold in canonical `(source, lane)` order.
 """
 struct KeyedReduce{K,V,W,F,S,R}
     operation::F
@@ -1039,10 +1055,11 @@ struct KeyedReduce{K,V,W,F,S,R}
             "KeyedReduce emission width must be a reviewed small static bound";
             stage = :construct, contract = :keyed_reduce_emission_width,
             expected = 1:32, actual = W))
-        seed isa NewKeyIdentity{V} || throw(LocalMathValidationError(
-            "KeyedReduce requires an exact-typed new-key identity";
-            stage = :construct, contract = :keyed_reduce_seed,
-            expected = V, actual = typeof(seed)))
+        seed isa Union{NewKeyIdentity{V},RebuildFromIdentity{V}} || throw(
+            LocalMathValidationError(
+                "KeyedReduce requires an exact-typed incremental or rebuild identity";
+                stage = :construct, contract = :keyed_reduce_seed,
+                expected = V, actual = typeof(seed)))
         retention isa Union{RetainAllKeys,DropIdentityKeys} || throw(
             LocalMathValidationError(
                 "KeyedReduce requires an explicit key-retention law";
@@ -1930,7 +1947,8 @@ function _validate_stage_publication_domain(
     end
     if publication.law isa Union{Collect,KeyedReduce}
         width = _publication_width(publication.law)
-        prior = publication.law isa KeyedReduce ?
+        prior = publication.law isa KeyedReduce &&
+            _keyed_reduce_includes_stage_entry(publication.law.seed) ?
             Int(only(publication.components).collection.capacity) : 0
         length(source) <= div(Int(typemax(Int32) - 1) - prior, width) || throw(
             LocalMathValidationError(

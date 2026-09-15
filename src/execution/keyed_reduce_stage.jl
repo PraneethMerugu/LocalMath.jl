@@ -15,6 +15,7 @@ const _KEYED_REDUCE_STATUS_INVALID_CONTROL = Int32(5)
 
 struct _KeyedReduceBounds
     capacity::Int32
+    includes_stage_entry::Bool
     candidate_count::Int32
     merge_passes::Int32
 end
@@ -46,17 +47,20 @@ function _keyed_reduce_physical(stage,
     storage = only(publication.components).storage
     emitted = _candidate_record_capacity(Int(stage.source_count), W,
         :keyed_reduce_emission_capacity; int32_index = true)
-    total = _candidate_record_capacity(1, Int(length(storage.records)) + emitted,
+    law = publication.law
+    capacity = Int32(length(storage.records))
+    includes_stage_entry = law.includes_stage_entry
+    prior_capacity = includes_stage_entry ? capacity : Int32(0)
+    total = _candidate_record_capacity(1, Int(prior_capacity) + emitted,
         :keyed_reduce_candidate_capacity; int32_index = true, terminal = true)
     merges = total > _COMPACTED_BLOCK ?
         ceil(Int, log2(cld(total, _COMPACTED_BLOCK))) : 0
-    law = publication.law
-    capacity = Int32(length(storage.records))
-    bounds = _KeyedReduceBounds(capacity, Int32(total), Int32(merges))
-    emission = _KeyedReduceEmission{W}(capacity)
+    bounds = _KeyedReduceBounds(capacity, includes_stage_entry,
+        Int32(total), Int32(merges))
+    emission = _KeyedReduceEmission{W}(prior_capacity)
     key_order = _KeyedReduceKeyOrder{K}()
     fold = _KeyedReduceFold{K,V,typeof(law.operation),typeof(law.retention)}(
-        capacity, law.operation, law.seed.value, law.retention)
+        prior_capacity, law.operation, law.identity, law.retention)
     publication = _KeyedReducePublication{K,V}()
     return _KeyedReducePhysical(bounds, emission, key_order, fold, publication)
 end
@@ -268,8 +272,12 @@ end
             state.positions[candidate] = Int32(0)
         end
     end
-    live = @inbounds storage.count[1]
-    valid_live = Int32(0) <= live <= bounds.capacity
+    live = Int32(0)
+    valid_live = true
+    if bounds.includes_stage_entry
+        live = @inbounds storage.count[1]
+        valid_live = Int32(0) <= live <= bounds.capacity
+    end
     if candidate <= bounds.capacity && valid_live && candidate <= live
         record = _compacted_load_value(eltype(storage.records),
             _compacted_record_components(storage.records), candidate)
@@ -576,7 +584,7 @@ function _execute_keyed_reduce_stage!(prepared::_KeyedReduceStagePreparation,
         states.ordering)
     order = _keyed_reduce_final_order(bounds, states.ordering)
     _keyed_reduce_segments_kernel!(backend, min(extent, _COMPACTED_BLOCK), extent)(
-        plan.key_order, states.segment, order, bounds.capacity,
+        plan.key_order, states.segment, order, plan.fold.prior_capacity,
         bounds.candidate_count; ndrange = extent)
     _compacted_launch_prefix_scan!(backend, states.segment.item_counts,
         states.segment.prefix, states.ordering.sums)

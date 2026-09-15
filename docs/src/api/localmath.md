@@ -52,12 +52,15 @@ Duplicate canonical identities fail validation before changing the previously
 published count or records. The ordinary CPU and Metal collection-order tests
 exercise these behaviors across partial workgroups with bounds checks enabled.
 
-### Incremental sparse keyed state
+### Sparse keyed update and rebuild
 
 `KeyedReduce` updates one bounded keyed `Collection` without introducing a
-second scheduler or storage authority. Prior records are intrinsic input state;
-the required `seed` keyword supplies the initial value only for a key absent at
-stage entry.
+second scheduler or storage authority. With `NewKeyIdentity`, prior records are
+intrinsic input state and the identity initializes only keys absent at stage
+entry. With `RebuildFromIdentity`, stage-entry keys and values are ignored and
+every emitted key begins at the identity, so successful execution replaces the
+complete logical collection. Both policies use the same failure-atomic
+publication path.
 
 ```julia
 import KernelAbstractions
@@ -90,13 +93,21 @@ wait(LocalMath.execute!(prepared))
 records = LocalMath.storage(prepared, counts)
 ```
 
-Every exact-key segment intrinsically folds an existing value first, then
-participating tuple lanes in canonical `(source, lane)` order. Invalid prior counts, duplicate prior
-keys, and final capacity overflow reject the whole publication, leaving its
-records and logical count unchanged. `prepare` owns the bounded device
-workspace; execution performs no device allocation. Public `execute!` and
-`wait` still allocate shared host receipt/launch bookkeeping, which is tracked
-separately rather than claimed as zero-allocation execution.
+With `NewKeyIdentity`, every exact-key segment folds its stage-entry value first
+when one exists, then participating tuple lanes in canonical `(source, lane)`
+order. Invalid prior counts, duplicate prior keys, and final capacity overflow
+reject the whole publication, leaving its records and logical count unchanged.
+`prepare` owns the bounded device workspace; execution performs no device
+allocation. Public `execute!` and `wait` still allocate shared host
+receipt/launch bookkeeping, which is tracked separately rather than claimed as
+zero-allocation execution.
+
+For `RebuildFromIdentity`, only participating contributions form the candidate:
+every exact-key segment begins from the declared identity and then folds its
+participating tuple lanes in the same canonical order. Stage-entry count, keys,
+and values are not read or validated. Capacity, control, evaluator, and
+predecessor-stage failure still suppress publication, leaving the complete
+stage-entry collection observable until a successful replacement is published.
 
 ## Public surface
 
@@ -118,7 +129,7 @@ equation namespace:
 | Lifecycle | `Plan`, `PreparedPlan`, `ExecutionReceipt`, `LocalMathValidationError`, `bind`, `plan`, `Allocate`, `Temporary`, `MutableRelationStorage`, `storage`, `inspect`, `compilation_report`, `execution_contract`, `lowering_identity` |
 | Explicit laws | `Stage`, `Publication`, `Access`, `Control`, `SourceOrigin`, `Parameter`, `ParameterSchema`, `Evaluator`, `FieldPublication`, `CollectionPublication`, `FoldPublication`, `PublicationValue`, `sequence` |
 | Collections | `CollectionAccess`, `CollectionCount`, `BoundedGroup`, `SourcePositionAccess`, `CompactedStorage`, `BoundedGroupView`, `KeyedValue`, `one_group`, `group_by`, `source_order`, `canonical_by`, `persistent_source_position` |
-| Publication laws | `Unique`, `Reduce`, `Resolve`, `Collect`, `KeyedReduce`, `OrderedFold`, `TotalCoverage`, `PartialCoverage`, `UnreachableEmpty`, `PreserveEmpty`, `FillEmpty`, `IdentitySeed`, `ExistingSeed`, `NewKeyIdentity`, `RetainAllKeys`, `DropIdentityKeys`, `CanonicalLeftFold`, `RelaxedAtomic`, `ArgMin`, `ArgMax`, `CanonicalSourceLaneTie`, `TieMin`, `TieMax`, `RejectOverflow`, `EmptyCollection` |
+| Publication laws | `Unique`, `Reduce`, `Resolve`, `Collect`, `KeyedReduce`, `OrderedFold`, `TotalCoverage`, `PartialCoverage`, `UnreachableEmpty`, `PreserveEmpty`, `FillEmpty`, `IdentitySeed`, `ExistingSeed`, `NewKeyIdentity`, `RebuildFromIdentity`, `RetainAllKeys`, `DropIdentityKeys`, `CanonicalLeftFold`, `RelaxedAtomic`, `ArgMin`, `ArgMax`, `CanonicalSourceLaneTie`, `TieMin`, `TieMax`, `RejectOverflow`, `EmptyCollection` |
 | Ordered state | `FoldComponent`, `InitializedState`, `initialized_state`, `BoundedWrites`, `FoldStep` |
 | Bounded scalar operations | `fold`, `BoundedFold`, `Where`, `RejectInvalid`, `SkipInvalid`, `FillInvalid`, `RejectEmpty`, `RelaxedAssociative`, `BoundedFoldOutcome`, `evaluate_bounded` |
 | Evaluator outputs | `UniqueValue`, `ConditionalUniqueValue`, `RoutedUniqueValue`, `ConditionalRoutedUniqueValue`, `Contribution`, `RoutedContribution`, `ResolutionValue`, `RoutedResolutionValue`, `CollectedValue`, `GroupedCollectedValue`, `KeyedContribution`, `FoldValue` |

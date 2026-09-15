@@ -4,6 +4,10 @@ import LocalMath
 const LMKR = LocalMath
 include("fixtures/keyed_reduce_contracts.jl")
 
+@test_throws LMKR.LocalMathValidationError LMKR.RebuildFromIdentity(:metadata)
+@test_throws LMKR.LocalMathValidationError LMKR.KeyedReduce(
+    Int32, Int32, +; seed = LMKR.RebuildFromIdentity(0.0f0))
+
 keyed_reduce_contract(KernelAbstractions.CPU())
 
 struct KeyedReduceNode end
