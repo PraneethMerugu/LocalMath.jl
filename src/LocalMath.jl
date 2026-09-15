@@ -32,7 +32,7 @@ public sequence, allocate_workspace, submission_capacity, ispending, success_gat
 public one_group, group_by, source_order, canonical_by
 public persistent_source_position
 public CompactedStorage, BoundedGroupView
-public Unique, Reduce, Resolve, Collect, OrderedFold
+public Unique, Reduce, Resolve, Collect, KeyedReduce, OrderedFold
 public TotalCoverage, PartialCoverage, UnreachableEmpty, PreserveEmpty, FillEmpty
 public IdentitySeed, ExistingSeed, CanonicalLeftFold, RelaxedAtomic
 public ArgMin, ArgMax, CanonicalSourceLaneTie, TieMin, TieMax
@@ -46,7 +46,8 @@ public BoundedFoldOutcome, evaluate_bounded
 public UniqueValue, ConditionalUniqueValue, RoutedUniqueValue
 public ConditionalRoutedUniqueValue, Contribution, RoutedContribution
 public ResolutionValue, RoutedResolutionValue, CollectedValue
-public GroupedCollectedValue, FoldValue
+public GroupedCollectedValue, KeyedValue, KeyedContribution, FoldValue
+public NewKeyIdentity, RetainAllKeys, DropIdentityKeys
 import Adapt
 import Atomix
 import KernelAbstractions
@@ -89,6 +90,7 @@ include("execution/ordered_fold_stage.jl")
 include("execution/fixed_lane_support.jl")
 include("execution/collect_physical_support.jl")
 include("execution/collect_stage.jl")
+include("execution/keyed_reduce_stage.jl")
 include("execution/stage_program_kernelabstractions.jl")
 include("execution/stage_program.jl")
 include("execution/program_inspection.jl")

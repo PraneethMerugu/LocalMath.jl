@@ -854,6 +854,41 @@ struct GroupedCollectedValue{K, T}
     end
 end
 
+"""One exact sparse key and its current reduced value."""
+struct KeyedValue{K,V}
+    key::K
+    value::V
+    function KeyedValue(::_ConstructionToken, key::K, value::V) where {K,V}
+        return new{K,V}(key, value)
+    end
+end
+function KeyedValue(key::K, value::V) where {K,V}
+        _qualified_rank_shape(K) || throw(LocalMathValidationError(
+            "a keyed value key must be Int32, UInt32, or a bounded flat tuple";
+            stage = :construct, contract = :keyed_reduce_key_type,
+            expected = :bounded_total_key, actual = K))
+        _storage_value_type(V) || throw(LocalMathValidationError(
+            "a keyed value requires an admitted storage value type";
+            stage = :construct, contract = :keyed_reduce_value_type, actual = V))
+    return KeyedValue(_CONSTRUCTION_TOKEN, key, value)
+end
+"""One optional sparse-key contribution emitted by a `KeyedReduce`."""
+struct KeyedContribution{K,V}
+    key::K
+    value::V
+    participates::Bool
+    function KeyedContribution(key::K, value::V, participates::Bool = true) where {K,V}
+        _qualified_rank_shape(K) || throw(LocalMathValidationError(
+            "a keyed contribution key must be Int32, UInt32, or a bounded flat tuple";
+            stage = :construct, contract = :keyed_reduce_key_type,
+            expected = :bounded_total_key, actual = K))
+        _storage_value_type(V) || throw(LocalMathValidationError(
+            "a keyed contribution requires an admitted storage value type";
+            stage = :construct, contract = :keyed_reduce_value_type, actual = V))
+        return new{K,V}(key, value, participates)
+    end
+end
+
 """`FoldValue(value, participates=true)` supplies one ordered recurrence value."""
 struct FoldValue{T}
     value::T
@@ -955,6 +990,82 @@ function Collect(
         _STAGE_MODEL_SEAL, T, Val(Int(maximum)), groups,
         order, projection, overflow, onempty
     )
+end
+
+"""Left-associated seed then participating candidates in canonical source/lane order."""
+struct CanonicalLeftFold end
+
+"""Seed a key absent from the stage-entry state with an exact identity."""
+struct NewKeyIdentity{V}
+    value::V
+    function NewKeyIdentity(value::V) where {V}
+        _storage_value_type(V) || throw(LocalMathValidationError(
+            "a keyed reduction identity requires an admitted storage value type";
+            stage = :construct, contract = :keyed_reduce_identity_type,
+            actual = V))
+        return new{V}(value)
+    end
+end
+
+"""Retain keys whose reduced value equals the new-key identity."""
+struct RetainAllKeys end
+"""Remove keys whose reduced value equals the new-key identity."""
+struct DropIdentityKeys end
+
+"""
+    KeyedReduce(K, V, operation; maximum=1, seed,
+        retention=DropIdentityKeys())
+
+Update one bounded sparse `Collection{KeyedValue{K,V}}`. Stage-entry records
+must have unique exact keys. Existing values are folded before participating
+contributions, followed by contributions in canonical `(source, lane)` order.
+"""
+struct KeyedReduce{K,V,W,F,S,R}
+    operation::F
+    seed::S
+    retention::R
+    function KeyedReduce(seal::_StageModelSeal, ::Type{K}, ::Type{V},
+            ::Val{W}, operation::F, seed::S,
+            retention::R) where {K,V,W,F,S,R}
+        seal === _STAGE_MODEL_SEAL || error("invalid stage-model seal")
+        _qualified_rank_shape(K) || throw(LocalMathValidationError(
+            "KeyedReduce keys must be Int32, UInt32, or a bounded flat tuple";
+            stage = :construct, contract = :keyed_reduce_key_type,
+            expected = :bounded_total_key, actual = K))
+        _storage_value_type(V) || throw(LocalMathValidationError(
+            "KeyedReduce values require an admitted storage value type";
+            stage = :construct, contract = :keyed_reduce_value_type, actual = V))
+        1 <= W <= 32 || throw(LocalMathValidationError(
+            "KeyedReduce emission width must be a reviewed small static bound";
+            stage = :construct, contract = :keyed_reduce_emission_width,
+            expected = 1:32, actual = W))
+        seed isa NewKeyIdentity{V} || throw(LocalMathValidationError(
+            "KeyedReduce requires an exact-typed new-key identity";
+            stage = :construct, contract = :keyed_reduce_seed,
+            expected = V, actual = typeof(seed)))
+        retention isa Union{RetainAllKeys,DropIdentityKeys} || throw(
+            LocalMathValidationError(
+                "KeyedReduce requires an explicit key-retention law";
+                stage = :construct, contract = :keyed_reduce_retention,
+                actual = R))
+        _device_law_callable(operation) || throw(LocalMathValidationError(
+            "KeyedReduce operation must be one concrete device-admissible callable";
+            stage = :construct, contract = :keyed_reduce_operation,
+            actual = _device_callable_rejection(operation;
+                path = (:keyed_reduce, :operation))))
+        return new{K,V,W,F,S,R}(operation, seed, retention)
+    end
+end
+
+function KeyedReduce(::Type{K}, ::Type{V}, operation;
+        maximum::Integer = 1, seed,
+        retention = DropIdentityKeys()) where {K,V}
+    maximum isa Bool && throw(LocalMathValidationError(
+        "KeyedReduce emission width must be an integer";
+        stage = :construct, contract = :keyed_reduce_emission_width,
+        actual = maximum))
+    return KeyedReduce(_STAGE_MODEL_SEAL, K, V, Val(Int(maximum)), operation,
+        seed, retention)
 end
 
 
@@ -1198,8 +1309,6 @@ struct IdentitySeed{T}
 end
 """`ExistingSeed()` initializes a reduction from the stage-entry destination value."""
 struct ExistingSeed end
-"""Left-associated seed then participating candidates in (source item, Relation lane) order."""
-struct CanonicalLeftFold end
 """Explicitly permits the planner's centrally qualified atomic reassociation."""
 struct RelaxedAtomic end
 
@@ -1480,11 +1589,13 @@ _publication_value_type(::Unique{T}) where {T} = T
 _publication_value_type(::Reduce{T}) where {T} = T
 _publication_value_type(::Resolve{R, I, T}) where {R, I, T} = T
 _publication_value_type(::Collect{T}) where {T} = T
+_publication_value_type(::KeyedReduce{K,V}) where {K,V} = V
 _publication_value_type(::OrderedFold{T}) where {T} = T
 _publication_width(::Unique{T, K}) where {T, K} = K
 _publication_width(::Reduce{T, K}) where {T, K} = K
 _publication_width(::Resolve{R, I, T, K}) where {R, I, T, K} = K
 _publication_width(::Collect{T, K}) where {T, K} = K
+_publication_width(::KeyedReduce{K,V,W}) where {K,V,W} = W
 _publication_width(::OrderedFold) = 1
 
 _unique_relation_admitted(
@@ -1641,6 +1752,22 @@ function _validate_publication(components::Tuple, law::Collect)
             actual = eltype(only(components).collection),
         )
     )
+    return nothing
+end
+
+function _validate_publication(components::Tuple, law::KeyedReduce{K,V}) where {K,V}
+    length(components) == 1 &&
+        only(components) isa CollectionPublication &&
+        only(components).role isa PublicationValue || throw(
+        LocalMathValidationError(
+            "KeyedReduce owns exactly one evaluator-fed Collection component";
+            stage = :construct, contract = :keyed_reduce_components))
+    eltype(only(components).collection) === KeyedValue{K,V} || throw(
+        LocalMathValidationError(
+            "KeyedReduce key/value types must equal its Collection element type";
+            stage = :construct, contract = :keyed_reduce_component_type,
+            expected = KeyedValue{K,V},
+            actual = eltype(only(components).collection)))
     return nothing
 end
 
@@ -1801,16 +1928,30 @@ function _validate_stage_publication_domain(
             )
         )
     end
-    if publication.law isa Collect
+    if publication.law isa Union{Collect,KeyedReduce}
         width = _publication_width(publication.law)
-        length(source) <= div(Int(typemax(Int32) - 1), width) || throw(
+        prior = publication.law isa KeyedReduce ?
+            Int(only(publication.components).collection.capacity) : 0
+        length(source) <= div(Int(typemax(Int32) - 1) - prior, width) || throw(
             LocalMathValidationError(
-                "Collect source/lane ordinals must fit below the reserved Int32 terminal";
-                stage = :construct, contract = :collect_candidate_ordinal,
-                expected = :nonterminal_int32, actual = (length(source), width),
+                "Collection source/lane ordinals must fit below the reserved Int32 terminal";
+                stage = :construct, contract = :collection_candidate_ordinal,
+                expected = :nonterminal_int32,
+                actual = (prior, length(source), width),
             )
         )
     end
+    return nothing
+end
+
+function _validate_keyed_reduce_stage_boundary(publications::Tuple)
+    position = findfirst(publication -> publication.law isa KeyedReduce,
+        publications)
+    position === nothing && return nothing
+    length(publications) == 1 || throw(LocalMathValidationError(
+        "KeyedReduce must be the sole publication of its Stage";
+        stage = :construct, contract = :keyed_reduce_terminal_publication,
+        expected = 1, actual = length(publications)))
     return nothing
 end
 
@@ -1935,6 +2076,12 @@ function _collect_lane_type_valid(lane::Type, publication::Publication)
     lane <: CollectedValue || return false
     return lane.parameters[1] === _publication_value_type(publication.law)
 end
+function _keyed_reduce_lane_type_valid(lane::Type, publication::Publication)
+    law = publication.law
+    lane <: KeyedContribution || return false
+    return lane.parameters[1] === typeof(law).parameters[1] &&
+        lane.parameters[2] === typeof(law).parameters[2]
+end
 function _ordered_fold_lane_type_valid(lane::Type, publication::Publication)
     lane <: FoldValue || return false
     return lane.parameters[1] === _publication_value_type(publication.law)
@@ -1948,6 +2095,8 @@ _publication_lane_type_valid(lane::Type, publication::Publication{C, <:Resolve})
     _resolve_lane_type_valid(lane, publication)
 _publication_lane_type_valid(lane::Type, publication::Publication{C, <:Collect}) where {C} =
     _collect_lane_type_valid(lane, publication)
+_publication_lane_type_valid(lane::Type, publication::Publication{C, <:KeyedReduce}) where {C} =
+    _keyed_reduce_lane_type_valid(lane, publication)
 _publication_lane_type_valid(lane::Type, publication::Publication{C, <:OrderedFold}) where {C} =
     _ordered_fold_lane_type_valid(lane, publication)
 
@@ -2121,6 +2270,7 @@ struct Stage{S <: Space, A, P, E <: Evaluator, C <: Control, O}
         _validate_stage_publication_fields(publications)
         _validate_stage_collection_uniqueness(publications)
         _validate_ordered_fold_stage_boundary(publications, accesses, control)
+        _validate_keyed_reduce_stage_boundary(publications)
         labels = _evaluator_port_names(publications)
         length(unique(labels)) == length(labels) || throw(
             LocalMathValidationError(

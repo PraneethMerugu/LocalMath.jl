@@ -265,28 +265,36 @@ function _require_definite_field_initialization(law::LocalLaw, field::Field)
     return nothing
 end
 
-function _collect_allocation_schema(law::LocalLaw, collection::Collection)
+function _collection_allocation_schema(law::LocalLaw, collection::Collection)
     schemas = Any[]
     for stage in law.stages, publication in stage.publications
-        publication.law isa Collect || continue
+        publication.law isa Union{Collect,KeyedReduce} || continue
         any(publication.components) do component
             component isa CollectionPublication &&
                 _same_descriptor(component.collection, collection)
         end || continue
-        law = publication.law
-        push!(schemas, (
-            grouped = _is_grouped(law.groups),
-            groups = Int(_compacted_group_count(law.groups)),
-            persistent_source_positions =
-                law.projection isa _PersistentSourcePosition,
-            source_position_count =
-                length(stage.source) * _publication_width(law),
-        ))
+        publication_law = publication.law
+        if publication_law isa Collect
+            push!(schemas, (
+                grouped = _is_grouped(publication_law.groups),
+                groups = Int(_compacted_group_count(publication_law.groups)),
+                persistent_source_positions =
+                    publication_law.projection isa _PersistentSourcePosition,
+                source_position_count =
+                    length(stage.source) * _publication_width(publication_law),
+            ))
+        else
+            push!(schemas, (
+                grouped = false, groups = 1,
+                persistent_source_positions = false,
+                source_position_count = 0,
+            ))
+        end
     end
     isempty(schemas) && throw(LocalMathValidationError(
-        "an allocated Collection requires a producing Collect publication";
+        "an allocated Collection requires a producing collection publication";
         stage = :bind, contract = :collection_allocation_producer,
-        expected = :collect_publication,
+        expected = :collection_publication,
         actual = semantic_identity(collection),
     ))
     all(schema -> schema == first(schemas), schemas) || throw(
@@ -306,7 +314,7 @@ function _collection_allocation(
         stage = :bind, contract = :collection_allocation_initialization,
         expected = :empty_collection, actual = request.initial,
     ))
-    schema = _collect_allocation_schema(law, collection)
+    schema = _collection_allocation_schema(law, collection)
     capacity = Int(collection.capacity)
     return CompactedStorage(
         backend,

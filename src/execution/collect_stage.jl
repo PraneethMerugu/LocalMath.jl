@@ -7,54 +7,6 @@
 
 const _COLLECT_STATUS_SUCCESS = Int32(0)
 const _COLLECT_STATUS_INVALID_CONTROL = Int32(5)
-const _COLLECT_BLOCK = _COMPACTED_BLOCK
-
-struct _CollectScanLevel{A}
-    storage::A
-    offset::Int32
-    count::Int32
-end
-Adapt.@adapt_structure _CollectScanLevel
-Base.length(level::_CollectScanLevel) = Int(level.count)
-@inline Base.getindex(level::_CollectScanLevel, index::Integer) =
-    @inbounds level.storage[Int(level.offset) + Int(index)]
-@inline function Base.setindex!(level::_CollectScanLevel, value, index::Integer)
-    @inbounds level.storage[Int(level.offset) + Int(index)] = value
-    return value
-end
-
-@inline _collect_scan_level(storage, offset::Int, count::Int) =
-    _CollectScanLevel(storage, Int32(offset), Int32(count))
-
-function _collect_scan_storage_lengths(items::Int)
-    prefix_count = 0
-    sums_count = 0
-    current = items
-    while true
-        blocks = max(cld(current, _COLLECT_BLOCK), 1)
-        prefix_count <= typemax(Int32) - current &&
-            sums_count <= typemax(Int32) - blocks || throw(
-            LocalMathValidationError(
-                "Collect scan workspace exceeds Int32 device addressing";
-                stage = :prepare, contract = :collect_scan_capacity,
-                expected = 0:typemax(Int32),
-                actual = (prefix_count + current, sums_count + blocks)))
-        prefix_count += current
-        sums_count += blocks
-        current <= _COLLECT_BLOCK && break
-        current = blocks
-    end
-    return prefix_count, sums_count
-end
-
-@inline function _collect_scan_level_count(items::Int)
-    levels = 1
-    while items > _COLLECT_BLOCK
-        items = max(cld(items, _COLLECT_BLOCK), 1)
-        levels += 1
-    end
-    return levels
-end
 
 struct _CollectPortPhysical{K,T,G,O,KT,IT}
     capacity::Int32
@@ -64,6 +16,9 @@ struct _CollectPortPhysical{K,T,G,O,KT,IT}
     sort_required::Bool
     merge_passes::Int32
 end
+
+_compacted_order_types(::_CollectPortPhysical{K,T,G,O,KT,IT}) where {
+    K,T,G,O,KT,IT} = (KT, IT)
 
 _collect_width(::_CollectPortPhysical{K}) where {K} = K
 _collect_grouped(::_OneGroup) = Val(false)
@@ -90,8 +45,8 @@ function _collect_port_physical(stage, publication::_PreparedStagePublication{C,
     # Prepared ordering is already effect/type admitted; the type parameters
     # merely specialize recursive record scratch and comparison kernels.
     sort_required = _is_grouped(law.groups) || _is_canonical_order(order)
-    merges = sort_required && candidates > _COLLECT_BLOCK ?
-        ceil(Int, log2(cld(candidates, _COLLECT_BLOCK))) : 0
+    merges = sort_required && candidates > _COMPACTED_BLOCK ?
+        ceil(Int, log2(cld(candidates, _COMPACTED_BLOCK))) : 0
     return _CollectPortPhysical{K,T,typeof(law.groups),typeof(order),
         key_type,identity_type}(
         Int32(length(storage.records)), Int32(candidates), law.groups, order,
@@ -169,7 +124,7 @@ function _collect_port_workspace_spec(
         _collect_component_workspace_spec(root, index, :identities,
             typeof(port).parameters[6], candidates, ())...,
     ) : ()
-    prefix_count, sums_count = _collect_scan_storage_lengths(items)
+    prefix_count, sums_count = _compacted_scan_storage_lengths(items)
     scan = (
         _workspace_leaf(Symbol(:collect_, index, :_prefix),
             (root..., :collect, :ports, index, :prefix), Int32,
@@ -276,7 +231,7 @@ function _collect_require_port_workspace(port, workspace)
             LocalMathValidationError("Collect workspace does not match its physical law";
                 stage = :prepare, contract = :collect_workspace_specialization,
         expected = (candidates, items, T), actual = :mismatched))
-    prefix_count, sums_count = _collect_scan_storage_lengths(items)
+    prefix_count, sums_count = _compacted_scan_storage_lengths(items)
     length(workspace.prefix) == prefix_count &&
         eltype(workspace.prefix) === Int32 &&
         length(workspace.sums) == sums_count &&
@@ -424,7 +379,7 @@ end
     if workspace.groups !== nothing
         group = @inbounds workspace.groups[candidate]
         if !(Int32(1) <= group <= port.groups.count)
-            _collect_atomic_min!(workspace.invalid_group, 1, Int32(candidate))
+            _compacted_atomic_min!(workspace.invalid_group, 1, Int32(candidate))
         end
     end
     return Int32(1)
@@ -570,70 +525,28 @@ end
 end
 
 function _collect_launch_scan!(backend, workspace)
-    current = length(workspace.item_counts)
-    prefix_offset = 0
-    sums_offset = 0
-    blocks = max(cld(current, _COLLECT_BLOCK), 1)
-    output = _collect_scan_level(workspace.prefix, prefix_offset, current)
-    sums = _collect_scan_level(workspace.sums, sums_offset, blocks)
-    extent = blocks * _COLLECT_BLOCK
-    _compacted_scan_block_kernel!(backend, _COLLECT_BLOCK, extent)(
-        workspace.item_counts, output, sums, Int32(current); ndrange = extent)
-    prefix_offset += current
-    sums_offset += blocks
-    current = blocks
-    input = sums
-    while current > 1
-        blocks = max(cld(current, _COLLECT_BLOCK), 1)
-        output = _collect_scan_level(workspace.prefix, prefix_offset, current)
-        sums = _collect_scan_level(workspace.sums, sums_offset, blocks)
-        extent = blocks * _COLLECT_BLOCK
-        _compacted_scan_block_kernel!(backend, _COLLECT_BLOCK, extent)(
-            input, output, sums, Int32(length(input)); ndrange = extent)
-        prefix_offset += current
-        sums_offset += blocks
-        current <= _COLLECT_BLOCK && break
-        current = blocks
-        input = sums
-    end
-    levels = _collect_scan_level_count(length(workspace.item_counts))
-    for level in (levels - 1):-1:1
-        size = length(workspace.item_counts)
-        child_offset = 0
-        for prior in 1:(level - 1)
-            child_offset += size
-            size = max(cld(size, _COLLECT_BLOCK), 1)
-        end
-        parent_size = max(cld(size, _COLLECT_BLOCK), 1)
-        parent_offset = child_offset + size
-        prefix = _collect_scan_level(workspace.prefix, child_offset, size)
-        parent = _collect_scan_level(
-            workspace.prefix, parent_offset, parent_size)
-        extent = max(length(prefix), 1)
-        _compacted_scan_add_kernel!(backend, min(extent, _COLLECT_BLOCK), extent)(
-            prefix, parent, Int32(length(prefix)); ndrange = extent)
-    end
-    return nothing
+    _compacted_launch_prefix_scan!(backend, workspace.item_counts,
+        workspace.prefix, workspace.sums)
 end
 
 function _collect_launch_order!(backend, plan, workspace)
     candidates = Int(plan.candidate_count)
     items = div(candidates, _collect_width(plan))
-    prefix = _collect_scan_level(workspace.prefix, 0, items)
+    prefix = _compacted_scan_level(workspace.prefix, 0, items)
     extent = max(items, 1)
-    _compacted_scatter_kernel!(backend, min(extent, _COLLECT_BLOCK), extent)(
+    _compacted_scatter_kernel!(backend, min(extent, _COMPACTED_BLOCK), extent)(
         workspace.valid, workspace.item_counts, prefix, workspace.order_a,
         workspace.positions, workspace.count, Val(_collect_width(plan)),
         Int32(items); ndrange = extent)
     plan.sort_required || return nothing
-    local_extent = max(cld(candidates, _COLLECT_BLOCK), 1) * _COLLECT_BLOCK
-    _compacted_local_bitonic_kernel!(backend, _COLLECT_BLOCK, local_extent)(
+    local_extent = max(cld(candidates, _COMPACTED_BLOCK), 1) * _COMPACTED_BLOCK
+    _compacted_local_bitonic_kernel!(backend, _COMPACTED_BLOCK, local_extent)(
         plan, workspace, workspace.count, Int32(candidates); ndrange = local_extent)
-    width, to_b = _COLLECT_BLOCK, true
+    width, to_b = _COMPACTED_BLOCK, true
     while width < candidates
         source, destination = to_b ? (workspace.order_a, workspace.order_b) :
             (workspace.order_b, workspace.order_a)
-        _compacted_merge_kernel!(backend, min(candidates, _COLLECT_BLOCK), candidates)(
+        _compacted_merge_kernel!(backend, min(candidates, _COMPACTED_BLOCK), candidates)(
             plan, workspace, source, destination, workspace.count, Int32(width),
             Int32(candidates); ndrange = candidates)
         width *= 2
@@ -641,13 +554,13 @@ function _collect_launch_order!(backend, plan, workspace)
     end
     if _is_grouped(plan.groups)
         groups = Int(plan.groups.count) + 1
-        _compacted_directory_kernel!(backend, min(groups, _COLLECT_BLOCK), groups)(
+        _compacted_directory_kernel!(backend, min(groups, _COMPACTED_BLOCK), groups)(
             workspace, _collect_final_order(plan, workspace), Int32(plan.groups.count);
             ndrange = groups)
     end
     if _is_canonical_order(plan.order)
         extent = max(candidates, 1)
-        _compacted_validate_order_kernel!(backend, min(extent, _COLLECT_BLOCK), extent)(
+        _compacted_validate_order_kernel!(backend, min(extent, _COMPACTED_BLOCK), extent)(
             plan, workspace, _collect_final_order(plan, workspace); ndrange = extent)
     end
     return nothing
@@ -662,7 +575,7 @@ function _collect_publish_chunk!(backend, plans::Tuple, workspaces::Tuple,
     groupeds = map(plan -> _collect_grouped(plan.groups), plans)
     extent = maximum(Int, extents)
     _compacted_publish_ports_kernel!(backend,
-        min(extent, _COLLECT_BLOCK), extent)(storages, workspaces, gate,
+        min(extent, _COMPACTED_BLOCK), extent)(storages, workspaces, gate,
         groupeds, extents; ndrange = extent)
     return nothing
 end
@@ -712,7 +625,7 @@ function _execute_collect_stage!(prepared::_CollectStagePreparation,
     predecessor_statuses = (relation_guard, predecessors...)
     extent = max(Int(execution.stage.source_count),
         maximum((Int(plan.candidate_count) for plan in execution.plans); init = 0), 1)
-    _collect_stage_reset_kernel!(backend, min(extent, _COLLECT_BLOCK), extent)(
+    _collect_stage_reset_kernel!(backend, min(extent, _COMPACTED_BLOCK), extent)(
         execution.workspaces, execution.status,
         execution.gate, prepared.validation, lease_index,
         Int32(extent); ndrange = extent)

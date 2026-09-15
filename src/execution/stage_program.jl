@@ -9,6 +9,7 @@ struct _CandidateStageExecutor{L}
     layout::L
 end
 struct _CollectStageExecutor end
+struct _KeyedReduceStageExecutor end
 struct _OrderedFoldStageExecutor end
 
 struct _StageEntryContext
@@ -103,10 +104,13 @@ function _collect_stage_executor(publications::Tuple{
     return _collect_stage_executor(Base.tail(publications))
 end
 _stage_executor(::Tuple{<:_PreparedStagePublication{C,L}}) where {
+    C,L<:_PreparedKeyedReduceLaw} = _KeyedReduceStageExecutor()
+_stage_executor(::Tuple{<:_PreparedStagePublication{C,L}}) where {
     C,L<:_PreparedOrderedFoldLaw} = _OrderedFoldStageExecutor()
 
 _stage_executor_name(::_CandidateStageExecutor) = :candidate
 _stage_executor_name(::_CollectStageExecutor) = :collect
+_stage_executor_name(::_KeyedReduceStageExecutor) = :keyed_reduce
 _stage_executor_name(::_OrderedFoldStageExecutor) = :ordered_fold
 
 _direct_identity_unique_lane(::Type, ::Unique) = false
@@ -258,6 +262,12 @@ function _stage_workspace_spec(
         path = (:stages, index), name_prefix = Symbol(:stage_, index))
 end
 function _stage_workspace_spec(
+        ::_KeyedReduceStageExecutor, admission::_StageAdmission, index::Int,
+    )
+    return _keyed_reduce_stage_workspace_spec(admission.stage;
+        path = (:stages, index), name_prefix = Symbol(:stage_, index))
+end
+function _stage_workspace_spec(
         ::_OrderedFoldStageExecutor, admission::_StageAdmission, index::Int,
     )
     return _ordered_fold_stage_workspace_spec(admission.stage;
@@ -315,6 +325,12 @@ _publication_law_inspection(law::Collect{T}) where {T} = (
     kind = :collect, value_type = T, maximum = _publication_width(law),
     groups = law.groups, order = law.order, projection = law.projection,
     conflicts = :collect, overflow = law.overflow, onempty = law.onempty,
+)
+_publication_law_inspection(law::KeyedReduce{K,V}) where {K,V} = (
+    kind = :keyed_reduce, key_type = K, value_type = V,
+    maximum = _publication_width(law), operation = law.operation,
+    seed = law.seed, retention = law.retention,
+    conflicts = :canonical_source_lane_left_fold,
 )
 _publication_law_inspection(law::OrderedFold{T}) where {T} = (
     kind = :ordered_fold, value_type = T,
@@ -825,6 +841,10 @@ _stage_program_workspace(entry::_StageLoweringEntry{A,W,<:_CollectStageExecutor}
     tree, lease_capacity::Int) where {A,W} =
     _collect_stage_workspace_from_tree(tree,
         _stage_entry_workspace_spec(entry, lease_capacity))
+_stage_program_workspace(entry::_StageLoweringEntry{A,W,<:_KeyedReduceStageExecutor},
+    tree, lease_capacity::Int) where {A,W} =
+    _keyed_reduce_stage_workspace_from_tree(tree,
+        _stage_entry_workspace_spec(entry, lease_capacity))
 _stage_program_workspace(entry::_StageLoweringEntry{A,W,<:_OrderedFoldStageExecutor},
     tree, lease_capacity::Int) where {A,W} =
     _ordered_fold_stage_workspace_from_tree(tree,
@@ -856,11 +876,16 @@ end
 _prepare_stage_entry(entry::_StageLoweringEntry{A,W,<:_CollectStageExecutor},
         raw) where {A,W} =
     _prepare_collect_stage(entry.admission, raw)
+_prepare_stage_entry(entry::_StageLoweringEntry{A,W,<:_KeyedReduceStageExecutor},
+        raw) where {A,W} =
+    _prepare_keyed_reduce_stage(entry.admission, raw)
 _prepare_stage_entry(entry::_StageLoweringEntry{A,W,<:_OrderedFoldStageExecutor},
         raw) where {A,W} =
     _prepare_ordered_fold_stage(entry.admission, raw)
 
 _stage_entry_validation(raw, ::_StageLoweringEntry) = raw.validation
+_stage_entry_validation(raw::_KeyedReduceStageWorkspace,
+    ::_StageLoweringEntry) = raw.tree.keyed_reduce.validation
 _stage_entry_validation(::Nothing, ::_StageLoweringEntry{
     A,W,<:_CandidateStageExecutor{<:_DirectIdentityUniqueLayout}}) where {A,W} =
     nothing
@@ -1019,6 +1044,14 @@ end
     return :invalid_failure_class
 end
 
+@inline function _stage_keyed_reduce_failure(code::Int32)
+    code == _KEYED_REDUCE_STATUS_CAPACITY && return :capacity_overflow
+    code == _KEYED_REDUCE_STATUS_PRIOR_COUNT && return :invalid_prior_count
+    code == _KEYED_REDUCE_STATUS_DUPLICATE && return :duplicate_key
+    code == _KEYED_REDUCE_STATUS_INVALID_CONTROL && return :invalid_control
+    return :invalid_failure_class
+end
+
 function _validated_publication_error(
         status::_ValidatedPublicationStatus{D,H,C}, lease_index::Int
     ) where {D,H,C<:_StageEntryContext}
@@ -1064,6 +1097,8 @@ function _validated_publication_error(
     failure_class = status.context.executor === :ordered_fold ? fold_failure :
         status.context.executor === :candidate ? _stage_candidate_failure(code) :
         status.context.executor === :collect ? _stage_collect_failure(code) :
+        status.context.executor === :keyed_reduce ?
+            _stage_keyed_reduce_failure(code) :
         :invalid_failure_class
     origin = publication === nothing ||
         !_has_source_origin(publication.origin) ?
@@ -1118,6 +1153,10 @@ _execute_stage_program_stage!(prepared::_CandidateStagePreparation,
 _execute_stage_program_stage!(prepared::_CollectStagePreparation,
     parameters::Tuple, lease_index::Int32, predecessors::Tuple, guard,
     program_validation) = _execute_collect_stage!(prepared, parameters,
+        lease_index, predecessors, guard, program_validation)
+_execute_stage_program_stage!(prepared::_KeyedReduceStagePreparation,
+    parameters::Tuple, lease_index::Int32, predecessors::Tuple, guard,
+    program_validation) = _execute_keyed_reduce_stage!(prepared, parameters,
         lease_index, predecessors, guard, program_validation)
 _execute_stage_program_stage!(prepared::_OrderedFoldStagePreparation,
     parameters::Tuple, lease_index::Int32, predecessors::Tuple, guard,
@@ -1316,6 +1355,17 @@ function _stage_publication_callable_admissions(stage,
     return (_stage_group_callable_admissions(law.groups, T, analysis_cache)...,
         _stage_order_callable_admissions(
             law.order, T, :collect, analysis_cache)...)
+end
+function _stage_publication_callable_admissions(stage,
+        publication::_PreparedStagePublication{C,<:_PreparedKeyedReduceLaw{K,V}},
+        analysis_cache::Dict{Any,Any},
+    ) where {C,K,V}
+    signature = Tuple{V,V}
+    analysis = _cached_closed_callable_effect_analysis!(analysis_cache,
+        :closed_keyed_reduce, publication.law.operation, signature,
+        method_signature -> length(method_signature) == 3)
+    return (_stage_callable_admission(publication.law.operation, signature,
+        :keyed_reduce_operation, :closed_keyed_reduce, analysis),)
 end
 function _stage_publication_callable_admissions(stage,
         publication::_PreparedStagePublication{

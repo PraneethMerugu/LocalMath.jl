@@ -217,7 +217,7 @@ function _project_publication(
         layout::_StageFieldLayout, publication::Publication,
     )
     law = publication.law
-    if law isa Collect
+    if law isa Union{Collect,KeyedReduce}
         component = only(publication.components)
         return (_ProjectedCollectionUse(
             _local_collection_slot(layout, component.collection),
@@ -370,9 +370,9 @@ function _control_field_dependency(
     )
 end
 
-function _stage_collect_publication(stage::Stage, collection::Collection)
+function _stage_collection_publication(stage::Stage, collection::Collection)
     for publication in stage.publications
-        publication.law isa Collect || continue
+        publication.law isa Union{Collect,KeyedReduce} || continue
         component = only(publication.components)
         semantic_identity(component.collection) == semantic_identity(collection) ||
             continue
@@ -389,7 +389,7 @@ Base.@nospecializeinfer Base.@noinline function _nearest_preceding_collection_pu
         stages::Tuple, index::Int, collection::Collection)
     Base.@nospecialize stages
     for prior in (index - 1):-1:1
-        publication = _stage_collect_publication(stages[prior], collection)
+        publication = _stage_collection_publication(stages[prior], collection)
         publication === nothing || return prior, publication
     end
     return nothing
@@ -398,6 +398,10 @@ end
 function _validate_collection_access_law(
         access::CollectionAccess, publication::Publication, source::Space)
     producer_law = publication.law
+    producer_law isa KeyedReduce && throw(LocalMathValidationError(
+        "KeyedReduce state exposes its count but not dense-group or source-position access";
+        stage = :plan, contract = :keyed_reduce_collection_access,
+        expected = :collection_count_only, actual = typeof(access.law)))
     if access.law isa _BoundedGroup
         _is_grouped(producer_law.groups) || throw(LocalMathValidationError(
             "a bounded-group Collection access requires a densely grouped producer";
@@ -429,7 +433,7 @@ function _resolve_collection_access_law(
         bound::_BoundLaw, access::CollectionAccess,
         dependency::_PrecedingCollectionDependency)
     access.law isa _SourcePositionsAccess || return access.law
-    publication = _stage_collect_publication(
+    publication = _stage_collection_publication(
         bound.law.stages[dependency.stage], access.collection)
     publication === nothing && error("validated Collection producer is missing")
     width = _publication_width(publication.law)
@@ -462,9 +466,10 @@ Base.@nospecializeinfer Base.@noinline function _collection_dependency(bound::_B
     found = _nearest_preceding_collection_publication(
         bound.law.stages, index, collection)
     found === nothing && throw(LocalMathValidationError(
-        "a Collection consumer requires a preceding Collect publication in the same LocalLaw";
+        "a Collection consumer requires a preceding Collection publication in the same LocalLaw";
         stage = :plan, contract = :collection_producer,
-        expected = :preceding_collect, actual = semantic_identity(collection)))
+        expected = :preceding_collection_publication,
+        actual = semantic_identity(collection)))
     prior, publication = found
     access === nothing || _validate_collection_access_law(
         access, publication, bound.law.stages[index].source)

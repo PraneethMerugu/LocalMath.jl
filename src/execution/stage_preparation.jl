@@ -267,12 +267,19 @@ struct _PreparedCollectLaw{T,K,G,O,P}
     order::O
     projection::P
 end
+struct _PreparedKeyedReduceLaw{K,V,W,F,S,R}
+    operation::F
+    seed::S
+    retention::R
+end
 struct _PreparedOrderedFoldLaw{T,F,O}
     transition::F
     order::O
 end
 _publication_value_type(::_PreparedCollectLaw{T}) where {T} = T
 _publication_width(::_PreparedCollectLaw{T,K}) where {T,K} = K
+_publication_value_type(::_PreparedKeyedReduceLaw{K,V}) where {K,V} = V
+_publication_width(::_PreparedKeyedReduceLaw{K,V,W}) where {K,V,W} = W
 _publication_value_type(::_PreparedOrderedFoldLaw{T}) where {T} = T
 _publication_width(::_PreparedOrderedFoldLaw) = 1
 struct _PreparedStagePublication{C,L}; components::C; law::L; end
@@ -307,6 +314,7 @@ Adapt.@adapt_structure _PreparedFoldAccumulatorView
 # would create a second semantic authority rather than adapting device state.
 Adapt.adapt_structure(to, law::_PreparedOrderedFoldLaw) = law
 Adapt.adapt_structure(to, law::_PreparedCollectLaw) = law
+Adapt.adapt_structure(to, law::_PreparedKeyedReduceLaw) = law
 Adapt.adapt_structure(to, publication::_PreparedStagePublication) =
     _PreparedStagePublication(
         Adapt.adapt(to, publication.components), publication.law)
@@ -588,6 +596,39 @@ function _prepare_collect_storage(
     return _PreparedStageCollection(storage)
 end
 
+function _prepare_keyed_reduce_storage(
+        validated::_ValidatedStructuralBinding, stage::Stage,
+        component::CollectionPublication, use::_ProjectedCollectionUse,
+        law::KeyedReduce{K,V},
+    ) where {K,V}
+    binding = _collection_binding(validated, use.slot)
+    binding.collection == component.collection || throw(LocalMathValidationError(
+        "Collection projection resolves a conflicting semantic descriptor";
+        stage = :prepare, contract = :collection_projection_schema,
+        expected = component.collection, actual = binding.collection))
+    storage = binding.storage
+    capacity = Int(component.collection.capacity)
+    try
+        _validate_compacted_record_storage(
+            storage.records, KeyedValue{K,V}, capacity)
+        eltype(storage.count) === Int32 && size(storage.count) == (1,) ||
+            throw(ArgumentError("count"))
+        storage.segment_starts === nothing || throw(ArgumentError("directory"))
+        storage.source_position === nothing || throw(ArgumentError("source position"))
+        all(provenance -> eltype(provenance) === Int32 &&
+            size(provenance) == (capacity,),
+            (storage.source_item, storage.source_lane)) ||
+            throw(ArgumentError("provenance"))
+    catch error
+        throw(LocalMathValidationError(
+            "Collection storage does not exactly realize its KeyedReduce law";
+            stage = :prepare, contract = :keyed_reduce_storage_schema,
+            expected = (record_type = KeyedValue{K,V}, capacity),
+            actual = sprint(showerror, error)))
+    end
+    return _PreparedStageCollection(storage)
+end
+
 function _prepare_fold_state(
         projected::_ProjectedFoldState, law::OrderedFold,
     )
@@ -742,6 +783,18 @@ function _prepared_collect_law(backend, law::Collect{T,K},
     )
 end
 
+function _prepared_keyed_reduce_law(
+        backend, law::KeyedReduce{K,V,W}, analysis_cache,
+    ) where {K,V,W}
+    _centrally_qualified_rank_type(backend, K) || throw(LocalMathValidationError(
+        "KeyedReduce key type lacks centrally reviewed comparison operations";
+        stage = :prepare, contract = :keyed_reduce_key_capability,
+        expected = (K, :global_load_store), actual = typeof(backend)))
+    return _PreparedKeyedReduceLaw{K,V,W,typeof(law.operation),
+        typeof(law.seed),typeof(law.retention)}(
+        law.operation, law.seed, law.retention)
+end
+
 function _prepared_fold_law(backend, law::OrderedFold{T},
         analysis_cache::Dict{Any,Any}) where {T}
     order = _prepare_stage_order(
@@ -770,6 +823,16 @@ function _prepare_stage_publication(
             (_prepare_collect_storage(validated, stage, component, use, law),),
             _prepared_collect_law(backend, law, analysis_cache),
         )
+    elseif law isa KeyedReduce
+        component = only(publication.components)
+        use = only(uses)
+        use isa _ProjectedCollectionUse || throw(LocalMathValidationError(
+            "KeyedReduce requires a positional Collection projection";
+            stage = :prepare, contract = :keyed_reduce_projection))
+        return _PreparedStagePublication(
+            (_prepare_keyed_reduce_storage(
+                validated, stage, component, use, law),),
+            _prepared_keyed_reduce_law(backend, law, analysis_cache))
     elseif law isa OrderedFold
         projected = only(uses)
         projected isa _ProjectedFoldState || throw(LocalMathValidationError(
@@ -823,6 +886,32 @@ _validate_stage_publication_operation(backend, publication::Publication{C,<:Uniq
 _validate_stage_publication_operation(
         backend, publication::Publication{C,<:Collect},
     ) where {C} = nothing
+
+function _validate_stage_publication_operation(
+        backend, publication::Publication{C,<:KeyedReduce{K,V}},
+        analysis_cache = nothing,
+    ) where {C,K,V}
+    law = publication.law
+    signature = Tuple{V,V}
+    analysis = analysis_cache === nothing ? _closed_callable_effect_analysis(
+        law.operation, signature,
+        method_signature -> length(method_signature) == 3) :
+        _cached_closed_callable_effect_analysis!(analysis_cache,
+            :closed_keyed_reduce, law.operation, signature,
+            method_signature -> length(method_signature) == 3)
+    analysis.qualified && analysis.return_type === V || throw(
+        LocalMathValidationError(
+            "KeyedReduce operation fails its exact closed typed-IR contract";
+            stage = :plan, contract = :keyed_reduce_operation_effects,
+            expected = (signature, return_type = V),
+            actual = (callable_type = typeof(law.operation),
+                selected_method = analysis.method, signature,
+                qualified = analysis.qualified,
+                return_type = analysis.return_type,
+                reason = analysis.reason, operation = analysis.operation),
+            hint = analysis.hint))
+    return nothing
+end
 
 _validate_stage_publication_operation(
         backend, publication::Publication{C,<:OrderedFold},

@@ -371,7 +371,7 @@ function _planned_stage_phases(entry::_StageLoweringEntry{
     push!(phases, _phase_fact(:collect_evaluate))
     for port in entry.workspace.ports
         items = div(Int(port.candidate_count), _collect_width(port))
-        levels = _collect_scan_level_count(items)
+        levels = _compacted_scan_level_count(items)
         push!(phases, _phase_fact(:collect_scan_block, levels))
         levels == 1 || push!(phases,
             _phase_fact(:collect_scan_add, levels - 1))
@@ -391,6 +391,40 @@ function _planned_stage_phases(entry::_StageLoweringEntry{
         _phase_fact(:collect_publish,
             cld(length(entry.admission.stage.publications),
                 _POINTWISE_SEGMENT_LIMIT))))
+    return Tuple(phases)
+end
+function _planned_stage_phases(entry::_StageLoweringEntry{
+        A,W,<:_KeyedReduceStageExecutor}) where {A,W}
+    plan = entry.workspace.plan
+    levels = _compacted_scan_level_count(Int(plan.bounds.candidate_count))
+    phases = Any[_phase_fact(:keyed_reduce_reset)]
+    append!(phases, _planned_relation_phases(entry))
+    append!(phases, (
+        _phase_fact(:keyed_reduce_evaluate),
+        _phase_fact(:keyed_reduce_scan_block, levels),
+    ))
+    levels == 1 || push!(phases,
+        _phase_fact(:keyed_reduce_scan_add, levels - 1))
+    append!(phases, (
+        _phase_fact(:keyed_reduce_scatter),
+        _phase_fact(:keyed_reduce_local_bitonic),
+    ))
+    plan.bounds.merge_passes == 0 || push!(phases,
+        _phase_fact(:keyed_reduce_merge, plan.bounds.merge_passes))
+    push!(phases, _phase_fact(:keyed_reduce_segment))
+    push!(phases, _phase_fact(:keyed_reduce_segment_prefix_scan_block, levels))
+    levels == 1 || push!(phases,
+        _phase_fact(:keyed_reduce_segment_prefix_scan_add, levels - 1))
+    append!(phases, (
+        _phase_fact(:keyed_reduce_unique_count),
+        _phase_fact(:keyed_reduce_clear_retention),
+        _phase_fact(:keyed_reduce_fold),
+    ))
+    push!(phases, _phase_fact(:keyed_reduce_retention_prefix_scan_block, levels))
+    levels == 1 || push!(phases,
+        _phase_fact(:keyed_reduce_retention_prefix_scan_add, levels - 1))
+    append!(phases, (_phase_fact(:keyed_reduce_final_count),
+        _phase_fact(:keyed_reduce_finalize), _phase_fact(:keyed_reduce_publish)))
     return Tuple(phases)
 end
 function _planned_stage_phases(entry::_StageLoweringEntry{
@@ -424,6 +458,7 @@ _stage_layout_name(::_CandidateStageExecutor{<:_GroupedCandidateLayout}) =
 _stage_layout_name(::_CandidateStageExecutor{<:_DirectIdentityUniqueLayout}) =
     :direct_identity_unique
 _stage_layout_name(::_CollectStageExecutor) = :compacted_sequence
+_stage_layout_name(::_KeyedReduceStageExecutor) = :sparse_keyed_sequence
 _stage_layout_name(::_OrderedFoldStageExecutor) = :ordered_recurrence
 
 function _segment_materializations(law::LocalLaw, indices)
