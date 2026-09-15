@@ -47,7 +47,7 @@ public UniqueValue, ConditionalUniqueValue, RoutedUniqueValue
 public ConditionalRoutedUniqueValue, Contribution, RoutedContribution
 public ResolutionValue, RoutedResolutionValue, CollectedValue
 public GroupedCollectedValue, KeyedValue, KeyedContribution, FoldValue
-public NewKeyIdentity, RetainAllKeys, DropIdentityKeys
+public NewKeyIdentity, RebuildFromIdentity, RetainAllKeys, DropIdentityKeys
 import Adapt
 import Atomix
 import KernelAbstractions

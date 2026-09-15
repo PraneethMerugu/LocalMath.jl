@@ -267,9 +267,10 @@ struct _PreparedCollectLaw{T,K,G,O,P}
     order::O
     projection::P
 end
-struct _PreparedKeyedReduceLaw{K,V,W,F,S,R}
+struct _PreparedKeyedReduceLaw{K,V,W,F,R}
     operation::F
-    seed::S
+    identity::V
+    includes_stage_entry::Bool
     retention::R
 end
 struct _PreparedOrderedFoldLaw{T,F,O}
@@ -791,8 +792,9 @@ function _prepared_keyed_reduce_law(
         stage = :prepare, contract = :keyed_reduce_key_capability,
         expected = (K, :global_load_store), actual = typeof(backend)))
     return _PreparedKeyedReduceLaw{K,V,W,typeof(law.operation),
-        typeof(law.seed),typeof(law.retention)}(
-        law.operation, law.seed, law.retention)
+        typeof(law.retention)}(
+        law.operation, law.seed.value,
+        _keyed_reduce_includes_stage_entry(law.seed), law.retention)
 end
 
 function _prepared_fold_law(backend, law::OrderedFold{T},

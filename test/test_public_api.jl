@@ -45,7 +45,7 @@
         :ConditionalRoutedUniqueValue, :Contribution, :RoutedContribution,
         :ResolutionValue, :RoutedResolutionValue, :CollectedValue,
         :GroupedCollectedValue, :KeyedValue, :KeyedContribution, :FoldValue,
-        :NewKeyIdentity,
+        :NewKeyIdentity, :RebuildFromIdentity,
         :RetainAllKeys, :DropIdentityKeys,
     ))
     public_qualified = Set(filter(

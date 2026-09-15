@@ -39,8 +39,13 @@ struct OverflowKeyedReduceEvaluator end
 @inline (::OverflowKeyedReduceEvaluator)(item::Int32, reads, parameters) =
     (; delta = LocalMath.KeyedContribution(Int32(item), Int32(1)))
 
+struct RebuildOrderedKeyedReduceEvaluator end
+@inline (::RebuildOrderedKeyedReduceEvaluator)(item::Int32, reads, parameters) =
+    (; delta = LocalMath.KeyedContribution(Int32(3), item))
+
 function _shared_keyed_program(backend, source_count, key_type, capacity,
         evaluator; maximum = 1, operation = +,
+        seed = LocalMath.NewKeyIdentity(Int32(0)),
         retention = LocalMath.DropIdentityKeys(), parameters = (),
         control = LocalMath.Control(), storage = nothing)
     source = LocalMath.Space(KeyedReduceContractNode, source_count)
@@ -48,8 +53,7 @@ function _shared_keyed_program(backend, source_count, key_type, capacity,
     stage = LocalMath.Stage(source, NamedTuple(), (
             LocalMath.Publication(records,
                 LocalMath.KeyedReduce(key_type, Int32, operation;
-                    maximum, seed = LocalMath.NewKeyIdentity(Int32(0)),
-                    retention); value = :delta),),
+                    maximum, seed, retention); value = :delta),),
         LocalMath.Evaluator(evaluator, parameters), control,
         LocalMath.SourceOrigin(:keyed_reduce_contract, 2))
     schema = isempty(parameters) ? LocalMath.ParameterSchema() :
@@ -186,6 +190,86 @@ function keyed_reduce_contract(backend)
         @test Array(count_storage.count) == Int32[-1]
         @test collect(LocalMath.Adapt.adapt(
             Array, count_storage.records)) == count_before
+
+        rebuild_storage = _initialize_scalar_keyed_storage!(
+            LocalMath.CompactedStorage(backend,
+                LocalMath.KeyedValue{Int32,Int32}, 2),
+            Int32[4, 4], Int32[6, 7], 2)
+        rebuild, rebuild_storage = _shared_keyed_program(backend, 2,
+            Int32, 2, OverflowKeyedReduceEvaluator();
+            seed = LocalMath.RebuildFromIdentity(Int32(0)),
+            storage = rebuild_storage)
+        wait(LocalMath.execute!(rebuild))
+        @test Array(rebuild_storage.count) == Int32[2]
+        @test collect(LocalMath.Adapt.adapt(
+            Array, rebuild_storage.records))[1:2] == [
+                LocalMath.KeyedValue(Int32(1), Int32(1)),
+                LocalMath.KeyedValue(Int32(2), Int32(1)),
+            ]
+
+        ordered_rebuild_storage = _initialize_scalar_keyed_storage!(
+            LocalMath.CompactedStorage(backend,
+                LocalMath.KeyedValue{Int32,Int32}, 4),
+            Int32[8, 0, 0, 0], Int32[9, 0, 0, 0], 1)
+        ordered_rebuild, ordered_rebuild_storage = _shared_keyed_program(
+            backend, 2, Int32, 4, RebuildOrderedKeyedReduceEvaluator();
+            operation = OrderedLaneDecimalFold(),
+            seed = LocalMath.RebuildFromIdentity(Int32(0)),
+            retention = LocalMath.RetainAllKeys(),
+            storage = ordered_rebuild_storage)
+        wait(LocalMath.execute!(ordered_rebuild))
+        @test Array(ordered_rebuild_storage.count) == Int32[1]
+        @test collect(LocalMath.Adapt.adapt(
+            Array, ordered_rebuild_storage.records))[1] ==
+                LocalMath.KeyedValue(Int32(3), Int32(12))
+        incremental_peer, _ = _shared_keyed_program(
+            backend, 2, Int32, 4, RebuildOrderedKeyedReduceEvaluator();
+            operation = OrderedLaneDecimalFold(),
+            seed = LocalMath.NewKeyIdentity(Int32(0)),
+            retention = LocalMath.RetainAllKeys())
+        rebuild_facts = LocalMath.inspect(ordered_rebuild)
+        incremental_facts = LocalMath.inspect(incremental_peer)
+        @test only(only(rebuild_facts.stages).publications).details.law.seed isa
+            LocalMath.RebuildFromIdentity{Int32}
+        @test LocalMath.lowering_identity(ordered_rebuild.plan) ===
+            LocalMath.lowering_identity(incremental_peer.plan)
+        @test only(rebuild_facts.planning.physical_segments).family ===
+            only(incremental_facts.planning.physical_segments).family ===
+            :sparse_keyed_sequence
+        wait(LocalMath.execute!(rebuild))
+        @test collect(LocalMath.Adapt.adapt(
+            Array, rebuild_storage.records))[1:2] == [
+                LocalMath.KeyedValue(Int32(1), Int32(1)),
+                LocalMath.KeyedValue(Int32(2), Int32(1)),
+            ]
+
+        rebuild_overflow_storage = _initialize_scalar_keyed_storage!(
+            LocalMath.CompactedStorage(backend,
+                LocalMath.KeyedValue{Int32,Int32}, 1),
+            Int32[9], Int32[4], 1)
+        rebuild_overflow, rebuild_overflow_storage = _shared_keyed_program(
+            backend, 2, Int32, 1, OverflowKeyedReduceEvaluator();
+            seed = LocalMath.RebuildFromIdentity(Int32(0)),
+            storage = rebuild_overflow_storage)
+        rebuild_overflow_before = collect(LocalMath.Adapt.adapt(
+            Array, rebuild_overflow_storage.records))
+        failure = _keyed_failure(LocalMath.execute!(rebuild_overflow))
+        @test failure isa LocalMath.LocalMathValidationError
+        @test failure.actual.failure_class === :capacity_overflow
+        @test Array(rebuild_overflow_storage.count) == Int32[1]
+        @test collect(LocalMath.Adapt.adapt(Array,
+            rebuild_overflow_storage.records)) == rebuild_overflow_before
+
+        ignored_count_storage = _initialize_scalar_keyed_storage!(
+            LocalMath.CompactedStorage(backend,
+                LocalMath.KeyedValue{Int32,Int32}, 1),
+            Int32[8], Int32[5], -1)
+        ignored_count, ignored_count_storage = _shared_keyed_program(backend,
+            0, Int32, 1, EmptyKeyedReduceEvaluator();
+            seed = LocalMath.RebuildFromIdentity(Int32(0)),
+            storage = ignored_count_storage)
+        wait(LocalMath.execute!(ignored_count))
+        @test Array(ignored_count_storage.count) == Int32[0]
 
         limit = LocalMath.Parameter(:limit, Int32;
             bounds = (Int32(0), Int32(2)))
