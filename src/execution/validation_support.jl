@@ -94,15 +94,6 @@ _is_publication_validation_error(error) = error isa LocalMathValidationError &&
         :runtime_ordered_fold_validation,
     )
 
-function _transfer_validation_statuses!(statuses::Tuple)
-    isempty(statuses) && return nothing
-    # Every Stage status is a contextual view of this same program-level
-    # buffer. One host-visible copy is therefore the complete settlement.
-    status = first(statuses)
-    _transfer_validation_status!(status.device, status.host)
-    return nothing
-end
-
 @inline function _transfer_validation_status!(device, host)
     copyto!(host, device)
     return nothing

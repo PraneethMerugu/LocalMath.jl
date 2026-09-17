@@ -11,6 +11,11 @@ end
 @inline (evaluator::LMEReceiptEvaluator)(item::Int32, reads, parameters) =
     (value = LMER.UniqueValue(evaluator.value + item),)
 
+function execution_receipt_provider_fault_kernel(storage)
+    storage[2] = Int32(1)
+    return
+end
+
 function execution_receipt_receipt_preparation(array_type, backend, value::Int32;
         dependency_arity::Int = 0, lease_capacity::Int = 1)
     space = LMER.Space(LMEReceiptNode, 2)
@@ -82,12 +87,12 @@ end
 
     @test Array(quaternary[2]) == Int32[51, 52]
     @test LMER.ispending(event_a)
-    synchronizations = LMER.inspect(
+    completions = LMER.inspect(
         quaternary[1]).realized.state.provider_scope_completions
     LMER.waitall(event_a, event_b, event_1, event_2)
     @test LMER.inspect(
         quaternary[1]).realized.state.provider_scope_completions ==
-        synchronizations
+        completions
 
     cpu_root, _ = execution_receipt_receipt_preparation(identity,
         LMER.KernelAbstractions.CPU(), Int32(60))
@@ -125,6 +130,16 @@ end
     @test child_error.contract === :execution_dependency
     @test Array(failing_storage) == Int32[91]
     @test Array(dependent_storage) == fill(Int32(-1), 2)
+    semantic_error = try
+        wait(failed)
+        nothing
+    catch error
+        error
+    end
+    @test semantic_error isa LMER.LocalMathValidationError
+    @test semantic_error.contract === :runtime_stage_validation
+    @test LMER.submission_capacity(failing).outstanding == 0
+    @test LMER.submission_capacity(dependent).outstanding == 0
 
     warm, warm_storage = execution_receipt_receipt_preparation(Metal.MtlArray, backend,
         Int32(90); lease_capacity = 1)
@@ -133,4 +148,79 @@ end
     @test warm_result.compile_time == 0.0
     @test warm_result.recompile_time == 0.0
     @test Array(warm_storage) == Int32[91, 92]
+
+    provider_fault = fetch(@async begin
+        isolated_backend = Metal.MetalBackend()
+        prepared, _ = execution_receipt_receipt_preparation(
+            Metal.MtlArray, isolated_backend, Int32(100))
+        fault_storage = Metal.MtlArray(Int32[0])
+        receipt = LMER.execute!(prepared)
+        Metal.@metal threads=1 execution_receipt_provider_fault_kernel(
+            fault_storage)
+        first_error = try
+            wait(receipt)
+            nothing
+        catch error
+            error
+        end
+        cached_error = try
+            wait(receipt)
+            nothing
+        catch error
+            error
+        end
+        (; first_error, cached_error,
+            pending = LMER.ispending(receipt),
+            capacity = LMER.submission_capacity(prepared))
+    end)
+    @test provider_fault.first_error isa LMER.LocalMathValidationError
+    @test provider_fault.first_error.contract === :provider_execution
+    @test provider_fault.first_error.actual isa Metal.KernelException
+    @test provider_fault.cached_error === provider_fault.first_error
+    @test !provider_fault.pending
+    @test provider_fault.capacity.outstanding == 0
+    @test provider_fault.capacity.drained == UInt64(1)
+
+    grouped_provider_fault = fetch(@async begin
+        isolated_backend = Metal.MetalBackend()
+        first, _ = execution_receipt_receipt_preparation(
+            Metal.MtlArray, isolated_backend, Int32(110))
+        second, _ = execution_receipt_receipt_preparation(
+            Metal.MtlArray, isolated_backend, Int32(120))
+        fault_storage = Metal.MtlArray(Int32[0])
+        first_receipt = LMER.execute!(first)
+        second_receipt = LMER.execute!(second)
+        Metal.@metal threads=1 execution_receipt_provider_fault_kernel(
+            fault_storage)
+        failure = try
+            LMER.waitall(second_receipt, first_receipt)
+            nothing
+        catch error
+            error
+        end
+        first_cached = try
+            wait(first_receipt)
+            nothing
+        catch error
+            error
+        end
+        second_cached = try
+            wait(second_receipt)
+            nothing
+        catch error
+            error
+        end
+        (; failure, first_cached, second_cached,
+            first_capacity = LMER.submission_capacity(first),
+            second_capacity = LMER.submission_capacity(second))
+    end)
+    @test grouped_provider_fault.failure isa LMER.LocalMathValidationError
+    @test grouped_provider_fault.failure.contract === :provider_execution
+    @test grouped_provider_fault.failure.actual isa Metal.KernelException
+    @test grouped_provider_fault.first_cached === grouped_provider_fault.failure
+    @test grouped_provider_fault.second_cached === grouped_provider_fault.failure
+    @test grouped_provider_fault.first_capacity.outstanding == 0
+    @test grouped_provider_fault.first_capacity.drained == UInt64(1)
+    @test grouped_provider_fault.second_capacity.outstanding == 0
+    @test grouped_provider_fault.second_capacity.drained == UInt64(1)
 end

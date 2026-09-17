@@ -301,11 +301,11 @@ end
 """
     ExecutionReceipt
 
-Logical execution receipt returned by [`execute!`](@ref). Physical waiting remains
-cumulative within a KernelAbstractions provider scope, while settlement,
+Logical execution receipt returned by [`execute!`](@ref). Provider completion
+remains cumulative within a KernelAbstractions provider scope, while settlement,
 failure caching, and lease release belong to the exact requested receipt.
-[`waitall`](@ref) groups receipts by provider scope and synchronizes each scope
-at most once.
+[`waitall`](@ref) groups receipts by provider scope and completes each scope at
+most once.
 """
 const _EXECUTION_RECEIPT_PENDING = UInt8(0)
 const _EXECUTION_RECEIPT_SUCCESS = UInt8(1)

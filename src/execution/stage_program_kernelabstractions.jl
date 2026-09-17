@@ -1,6 +1,7 @@
 # Hardware-agnostic KernelAbstractions provider. Kernel launches are implicitly
-# ordered by the backend; one KernelAbstractions.synchronize call is the only
-# execution-visibility boundary. No native stream, queue, or event is exposed.
+# ordered by the backend. Provider completion is observed either by an explicit
+# synchronize or by a nonempty blocking device-to-host validation copy. No
+# native stream, queue, or event is exposed.
 
 struct _KernelAbstractionsDeviceGetter end
 @inline (::_KernelAbstractionsDeviceGetter)(backend) =
@@ -14,7 +15,7 @@ mutable struct _KernelAbstractionsScope{B, D, T, E, G}
     const device_getter::G
     poisoned::Bool
     poison_reason::Any
-    synchronizations::Int
+    completions::Int
     transfers::Int
     submitted_ordinal::UInt64
     settled_ordinal::UInt64
@@ -22,7 +23,7 @@ end
 
 mutable struct _KernelAbstractionsLane{S} <: _AbstractProviderLane
     const scope::S
-    waits::Int
+    completions::Int
     transfers::Int
 end
 
@@ -117,13 +118,13 @@ _lane_transfer_law(::_KernelAbstractionsLane) = :same_owner_task_only
 _lane_cumulative(::_KernelAbstractionsLane) = true
 _lane_selective(::_KernelAbstractionsLane) = false
 _lane_error_observation(::_KernelAbstractionsLane) = (
-    synchronization = :kernelabstractions_backend_contract,
+    completion = :blocking_validation_transfer_or_backend_synchronize,
     asynchronous_failures = :backend_defined,
     failure_scope = :backend_owner_task,
 )
-_lane_wait_count(lane::_KernelAbstractionsLane) = lane.waits
-_lane_scope_wait_count(lane::_KernelAbstractionsLane) =
-    lane.scope.synchronizations
+_lane_completion_count(lane::_KernelAbstractionsLane) = lane.completions
+_lane_scope_completion_count(lane::_KernelAbstractionsLane) =
+    lane.scope.completions
 _lane_transfer_count(lane::_KernelAbstractionsLane) = lane.transfers
 _lane_same_wait_scope(
     first::_KernelAbstractionsLane, second::_KernelAbstractionsLane
@@ -191,12 +192,12 @@ _validate_provider_capacity(::_KernelAbstractionsLane, evidence, capacity) =
     nothing
 
 function _synchronize_lane_tail!(lane::_KernelAbstractionsLane)
-    lane.waits += 1
+    lane.completions += 1
     scope = lane.scope
     current_task() === scope.owner || throw(LocalMathValidationError(
         "KernelAbstractions tail drain must use the preparing owner task"
     ))
-    scope.synchronizations += 1
+    scope.completions += 1
     try
         KernelAbstractions.synchronize(scope.backend)
     catch error
@@ -209,20 +210,22 @@ function _synchronize_lane_tail!(lane::_KernelAbstractionsLane)
     return nothing
 end
 
-function _settle_lane_tail!(lane::_KernelAbstractionsLane, statuses::Tuple)
+function _settle_lane_tail!(lane::_KernelAbstractionsLane, device, host)
     _validate_lane_current!(lane)
-    lane.waits += 1
+    lane.completions += 1
     scope = lane.scope
-    scope.synchronizations += 1
+    scope.completions += 1
     try
-        if isempty(statuses)
+        if isempty(host)
             KernelAbstractions.synchronize(scope.backend)
         else
             # A host-visible device-to-host copy is the provider completion
             # operation. GPU providers must complete their queued prefix before
             # returning host data; issuing a second explicit synchronize would
-            # duplicate that boundary (Metal and CUDA copies are blocking).
-            _transfer_validation_statuses!(statuses)
+            # duplicate that boundary. If a provider ever aliases the two
+            # representations, the copy is not a distinct completion operation.
+            device === host && KernelAbstractions.synchronize(scope.backend)
+            _transfer_validation_status!(device, host)
             scope.transfers += 1
             lane.transfers += 1
         end
@@ -248,11 +251,6 @@ end
 
 _drain_lane_tail!(lane::_KernelAbstractionsLane) =
     _synchronize_lane_tail!(lane)
-
-function _wait_lane!(lane::_KernelAbstractionsLane)
-    _validate_lane_current!(lane)
-    return _synchronize_lane_tail!(lane)
-end
 
 function _atomic_capability(
         backend::KernelAbstractions.Backend,

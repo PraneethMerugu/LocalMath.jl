@@ -402,19 +402,14 @@ function _cache_receipt_result!(receipt::ExecutionReceipt)
     return failure
 end
 
-function _synchronize_receipt_scope!(receipt::ExecutionReceipt)
-    lane = receipt.prepared.lane
-    receipt.scope_ordinal <= _lane_settled_ordinal(lane) && return nothing
-    target = _lane_scope_ordinal(lane)
-    try
-        _wait_lane!(lane)
-        _mark_lane_settled!(lane, target)
-    catch error
-        annotated = _provider_execution_error(error, :wait)
-        receipt.state = _EXECUTION_RECEIPT_PROVIDER_FAILURE
-        receipt.failure = annotated
-        throw(annotated)
-    end
+function _settle_prepared_scope!(prepared::PreparedPlan, target::UInt64,
+        seen::Base.IdSet{Any})
+    lane = prepared.lane
+    target <= _lane_settled_ordinal(lane) && return nothing
+    runtime = prepared.runtime
+    _settle_lane_tail!(lane, runtime.execution_gate, runtime.validation_host)
+    push!(seen, prepared)
+    _mark_lane_settled!(lane, target)
     return nothing
 end
 
@@ -427,8 +422,28 @@ function _transfer_receipt_statuses!(receipt::ExecutionReceipt, seen::Base.IdSet
         push!(seen, prepared)
     end
     for dependency in receipt.dependencies
+        # Admission permits unresolved dependencies only within this provider
+        # scope; settled cross-scope dependencies already own host-visible status.
         _receipt_settled(dependency) ||
             _transfer_receipt_statuses!(dependency, seen)
+    end
+    return nothing
+end
+
+function _settle_receipt_statuses!(receipt::ExecutionReceipt,
+        seen::Base.IdSet{Any})
+    try
+        lane = receipt.prepared.lane
+        receipt.scope_ordinal <= _lane_settled_ordinal(lane) ||
+            _settle_prepared_scope!(receipt.prepared,
+                _lane_scope_ordinal(lane), seen)
+        _transfer_receipt_statuses!(receipt, seen)
+    catch error
+        annotated = _provider_execution_error(error, :wait)
+        receipt.state = _EXECUTION_RECEIPT_PROVIDER_FAILURE
+        receipt.failure = annotated
+        _release_receipt_lease!(receipt)
+        throw(annotated)
     end
     return nothing
 end
@@ -438,8 +453,8 @@ function Base.wait(receipt::ExecutionReceipt)
         "this ExecutionReceipt belongs to another owner task";
         stage = :wait, contract = :receipt_owner))
     if !_receipt_settled(receipt)
-        _synchronize_receipt_scope!(receipt)
-        _transfer_receipt_statuses!(receipt, Base.IdSet{Any}())
+        seen = Base.IdSet{Any}()
+        _settle_receipt_statuses!(receipt, seen)
         _cache_receipt_result!(receipt)
     end
     receipt.failure === nothing || throw(receipt.failure)
@@ -449,8 +464,8 @@ end
 """
     waitall(receipts::ExecutionReceipt...)
 
-Settle several logical receipts, synchronizing each represented provider scope
-at most once. Cached failures are reported deterministically in argument order.
+Settle several logical receipts, completing each represented provider scope at
+most once. Cached failures are reported deterministically in argument order.
 Inspection is not required before waiting and waiting remains idempotent.
 """
 function waitall(receipts::Tuple{Vararg{ExecutionReceipt}})
@@ -458,7 +473,7 @@ function waitall(receipts::Tuple{Vararg{ExecutionReceipt}})
         "waitall requires at least one ExecutionReceipt";
         stage = :wait, contract = :receipt_group_arity,
         expected = :nonempty, actual = 0))
-    lanes = Any[]
+    settlement_prepared = Any[]
     targets = UInt64[]
     for receipt in receipts
         current_task() === receipt.prepared.owner || throw(
@@ -467,29 +482,36 @@ function waitall(receipts::Tuple{Vararg{ExecutionReceipt}})
                 stage = :wait, contract = :receipt_owner))
         lane = receipt.prepared.lane
         index = findfirst(candidate ->
-            _lane_same_wait_scope(candidate, lane), lanes)
+            _lane_same_wait_scope(candidate.lane, lane), settlement_prepared)
         if index === nothing
-            push!(lanes, lane)
+            push!(settlement_prepared, receipt.prepared)
             push!(targets, _lane_scope_ordinal(lane))
         else
             targets[index] = max(targets[index], _lane_scope_ordinal(lane))
         end
     end
     provider_failures = IdDict{Any,Any}()
-    for (lane, target) in zip(lanes, targets)
+    seen = Base.IdSet{Any}()
+    for (prepared, target) in zip(settlement_prepared, targets)
+        lane = prepared.lane
         target <= _lane_settled_ordinal(lane) && continue
         try
-            _wait_lane!(lane)
-            _mark_lane_settled!(lane, target)
+            _settle_prepared_scope!(prepared, target, seen)
         catch error
             provider_failures[lane.scope] =
                 _provider_execution_error(error, :wait)
         end
     end
-    seen = Base.IdSet{Any}()
     for receipt in receipts
         haskey(provider_failures, receipt.prepared.lane.scope) && continue
-        _receipt_settled(receipt) || _transfer_receipt_statuses!(receipt, seen)
+        if !_receipt_settled(receipt)
+            try
+                _transfer_receipt_statuses!(receipt, seen)
+            catch error
+                provider_failures[receipt.prepared.lane.scope] =
+                    _provider_execution_error(error, :wait)
+            end
+        end
     end
     first_failure = nothing
     for receipt in receipts
@@ -501,6 +523,7 @@ function waitall(receipts::Tuple{Vararg{ExecutionReceipt}})
             else
                 receipt.state = _EXECUTION_RECEIPT_PROVIDER_FAILURE
                 receipt.failure = provider_failure
+                _release_receipt_lease!(receipt)
             end
         end
         first_failure === nothing && receipt.failure !== nothing &&
