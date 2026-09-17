@@ -368,22 +368,22 @@ function _keyed_reduce_launch_order!(backend, bounds, key_order, state)
     _compacted_launch_prefix_scan!(backend, state.item_counts,
         state.prefix, state.sums)
     prefix = _compacted_scan_level(state.prefix, 0, candidates)
-    _compacted_scatter_kernel!(backend,
-        min(max(candidates, 1), _COMPACTED_BLOCK), max(candidates, 1))(
+    _launch_1d!(_compacted_scatter_kernel!, backend, max(candidates, 1),
+        Val(_COMPACTED_BLOCK),
         state.valid, state.item_counts, prefix, state.order_a,
-        state.positions, state.count, Val(1), Int32(candidates);
-        ndrange = max(candidates, 1))
+        state.positions, state.count, Val(1), Int32(candidates))
     local_extent = max(cld(candidates, _COMPACTED_BLOCK), 1) * _COMPACTED_BLOCK
-    _compacted_local_bitonic_kernel!(backend, _COMPACTED_BLOCK, local_extent)(
-        key_order, state, state.count, Int32(candidates);
-        ndrange = local_extent)
+    _launch_1d!(_compacted_local_bitonic_kernel!, backend, local_extent,
+        Val(_COMPACTED_BLOCK),
+        key_order, state, state.count, Int32(candidates))
     width, to_b = _COMPACTED_BLOCK, true
     while width < candidates
         source, destination = to_b ? (state.order_a, state.order_b) :
             (state.order_b, state.order_a)
-        _compacted_merge_kernel!(backend, min(candidates, _COMPACTED_BLOCK), candidates)(
+        _launch_1d!(_compacted_merge_kernel!, backend, candidates,
+            Val(_COMPACTED_BLOCK),
             key_order, state, source, destination, state.count,
-            Int32(width), Int32(candidates); ndrange = candidates)
+            Int32(width), Int32(candidates))
         width *= 2
         to_b = !to_b
     end
@@ -571,9 +571,9 @@ function _execute_keyed_reduce_stage!(prepared::_KeyedReduceStagePreparation,
         _stage_runtime_parameters(parameters, execution.stage))
     statuses = (relation_guard, predecessors...)
     extent = max(Int(bounds.candidate_count), 1)
-    _keyed_reduce_reset_kernel!(backend, min(extent, _COMPACTED_BLOCK), extent)(
-        bounds, states.reset, execution.storage, prepared.validation, lease_index;
-        ndrange = extent)
+    _launch_1d!(_keyed_reduce_reset_kernel!, backend, extent,
+        Val(_COMPACTED_BLOCK),
+        bounds, states.reset, execution.storage, prepared.validation, lease_index)
     _launch_stage_relation_receipt!(backend, relation_guard,
         prepared.validation, program_validation, lease_index)
     _keyed_reduce_evaluate_kernel!(backend)(qualified, plan.emission,
@@ -583,19 +583,20 @@ function _execute_keyed_reduce_stage!(prepared::_KeyedReduceStagePreparation,
     _keyed_reduce_launch_order!(backend, bounds, plan.key_order,
         states.ordering)
     order = _keyed_reduce_final_order(bounds, states.ordering)
-    _keyed_reduce_segments_kernel!(backend, min(extent, _COMPACTED_BLOCK), extent)(
+    _launch_1d!(_keyed_reduce_segments_kernel!, backend, extent,
+        Val(_COMPACTED_BLOCK),
         plan.key_order, states.segment, order, plan.fold.prior_capacity,
-        bounds.candidate_count; ndrange = extent)
+        bounds.candidate_count)
     _compacted_launch_prefix_scan!(backend, states.segment.item_counts,
         states.segment.prefix, states.ordering.sums)
     _keyed_reduce_unique_count_kernel!(backend, 1, 1)(states.segment;
         ndrange = 1)
-    _keyed_reduce_clear_counts_kernel!(backend,
-        min(extent, _COMPACTED_BLOCK), extent)(states.fold,
-        bounds.candidate_count;
-        ndrange = extent)
-    _keyed_reduce_fold_kernel!(backend, min(extent, _COMPACTED_BLOCK), extent)(
-        plan.fold, states.fold, order, bounds.candidate_count; ndrange = extent)
+    _launch_1d!(_keyed_reduce_clear_counts_kernel!, backend, extent,
+        Val(_COMPACTED_BLOCK),
+        states.fold, bounds.candidate_count)
+    _launch_1d!(_keyed_reduce_fold_kernel!, backend, extent,
+        Val(_COMPACTED_BLOCK),
+        plan.fold, states.fold, order, bounds.candidate_count)
     _compacted_launch_prefix_scan!(backend, states.fold.item_counts,
         states.fold.prefix, states.ordering.sums)
     _keyed_reduce_final_count_kernel!(backend, 1, 1)(
@@ -604,7 +605,8 @@ function _execute_keyed_reduce_stage!(prepared::_KeyedReduceStagePreparation,
         execution.status,
         prepared.validation, program_validation, statuses, lease_index;
         ndrange = 1)
-    _keyed_reduce_publish_kernel!(backend, min(extent, _COMPACTED_BLOCK), extent)(
-        plan.publication, states.publication, execution.storage; ndrange = extent)
+    _launch_1d!(_keyed_reduce_publish_kernel!, backend, extent,
+        Val(_COMPACTED_BLOCK),
+        plan.publication, states.publication, execution.storage)
     return prepared
 end

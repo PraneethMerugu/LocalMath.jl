@@ -71,6 +71,7 @@ include("execution.jl")
 include("inspection.jl")
 
 include("execution/mechanism_support.jl")
+include("execution/launch_support.jl")
 include("execution/validation_support.jl")
 include("execution/relation_views.jl")
 include("structural_binding.jl")

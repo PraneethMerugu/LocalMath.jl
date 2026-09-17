@@ -353,15 +353,11 @@ function _ordered_fold_stage_launch_order!(backend, order_law, workspace)
     while width <= extent
         distance = width >>> 1
         while distance >= 1
-            _ordered_fold_stage_bitonic_kernel!(
-                backend,
-                min(extent, _ORDERED_FOLD_BLOCK), extent
-            )(
+            _launch_1d!(_ordered_fold_stage_bitonic_kernel!, backend, extent,
+                Val(_ORDERED_FOLD_BLOCK),
                 order_law,
                 workspace.values, workspace.order,
-                Int32(distance), Int32(width), Int32(extent);
-                ndrange = extent
-            )
+                Int32(distance), Int32(width), Int32(extent))
             distance >>>= 1
         end
         width <<= 1
@@ -592,49 +588,33 @@ function _execute_ordered_fold_stage!(
         predecessors = prefix, program_validation,
     )
     order_extent = length(prepared.workspace.order)
-    _ordered_fold_stage_reset_kernel!(
-        prepared.backend,
-        min(order_extent, _ORDERED_FOLD_BLOCK), order_extent
-    )(
+    _launch_1d!(_ordered_fold_stage_reset_kernel!,
+        prepared.backend, order_extent, Val(_ORDERED_FOLD_BLOCK),
         prepared.workspace.order, prepared.workspace.status,
-        prepared.workspace.validation, lease_index, Int32(order_extent);
-        ndrange = order_extent
-    )
+        prepared.workspace.validation, lease_index, Int32(order_extent))
     _launch_stage_relation_receipt!(
         prepared.backend, relation_guard,
         prepared.validation, program_validation, lease_index
     )
     source_extent = max(Int(prepared.stage.source_count), 1)
-    _ordered_fold_stage_evaluate_kernel!(
-        prepared.backend,
-        min(source_extent, _ORDERED_FOLD_BLOCK), source_extent
-    )(
+    _launch_1d!(_ordered_fold_stage_evaluate_kernel!,
+        prepared.backend, source_extent, Val(_ORDERED_FOLD_BLOCK),
         qualified,
         prepared.workspace, lease_index, prefix,
-        prepared.stage.source_count; ndrange = source_extent
-    )
+        prepared.stage.source_count)
     _ordered_fold_stage_launch_order!(
         prepared.backend, law.order,
         prepared.workspace
     )
     state_extent = prepared.state_extent
     initialize_extent = max(source_extent, Int(state_extent), 1)
-    _ordered_fold_stage_validate_initialize_kernel!(
-        prepared.backend,
-        min(initialize_extent, _ORDERED_FOLD_BLOCK), initialize_extent
-    )(
+    _launch_1d!(_ordered_fold_stage_validate_initialize_kernel!,
+        prepared.backend, initialize_extent, Val(_ORDERED_FOLD_BLOCK),
         law.order, state, prepared.stage.fields, prepared.workspace,
-        lease_index, prefix, prepared.stage.source_count, state_extent;
-        ndrange = initialize_extent
-    )
+        lease_index, prefix, prepared.stage.source_count, state_extent)
     _ordered_fold_stage_kernel!(prepared.backend)(recurrence; ndrange = 1)
     state_launch = max(Int(state_extent), 1)
-    _ordered_fold_stage_finalize_kernel!(
-        prepared.backend,
-        min(state_launch, _ORDERED_FOLD_BLOCK), state_launch
-    )(
-        finalization;
-        ndrange = state_launch
-    )
+    _launch_1d!(_ordered_fold_stage_finalize_kernel!,
+        prepared.backend, state_launch, Val(_ORDERED_FOLD_BLOCK), finalization)
     return prepared
 end

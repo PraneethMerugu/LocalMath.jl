@@ -318,9 +318,8 @@ end
 function _group_destinations!(backend, grouping::_DestinationGrouping)
     local_extent = max(cld(Int(grouping.sort_capacity),
         _DESTINATION_GROUP_BLOCK), 1) * _DESTINATION_GROUP_BLOCK
-    _destination_grouping_local_sort_kernel!(
-        backend, _DESTINATION_GROUP_BLOCK, local_extent)(grouping;
-        ndrange = local_extent)
+    _launch_1d!(_destination_grouping_local_sort_kernel!,
+        backend, local_extent, Val(_DESTINATION_GROUP_BLOCK), grouping)
     source, destination = grouping.order_a, grouping.order_b
     width = _DESTINATION_GROUP_BLOCK
     while width < grouping.sort_capacity
