@@ -134,8 +134,8 @@ end
     four_dependencies = (event_a, event_b, event_1, event_2)
     four_bytes = _warm_receipt_bookkeeping_bytes(
         warm_four, four_dependencies)
-    @test zero_bytes <= 4096
-    @test four_bytes <= 4096
+    @test zero_bytes <= 1024
+    @test four_bytes <= 1024
 end
 
 @testset "receipt failures are exact, cached, and dependency-local" begin

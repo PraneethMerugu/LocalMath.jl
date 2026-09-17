@@ -114,16 +114,7 @@ function _success_gate(prepared::PreparedPlan, lease_index::Int32, parent)
         expected = prepared.owner,
         actual = current_task(),
     ))
-    statuses = map(
-        status -> status.device, _prepared_validation_statuses(prepared)
-    )
-    isempty(statuses) && throw(LocalMathValidationError(
-        "success_gate requires a source law with device validation status";
-        stage = :prepare,
-        contract = :validation_status,
-        expected = :device_validation_status,
-        actual = :none,
-    ))
+    statuses = (prepared.runtime.execution_gate,)
     return _SuccessfulLawGate(
         parent, statuses, lease_index
     )
@@ -430,8 +421,9 @@ end
 function _transfer_receipt_statuses!(receipt::ExecutionReceipt, seen::Base.IdSet{Any})
     prepared = receipt.prepared
     if !(prepared in seen)
-        _transfer_settled_validation_statuses!(prepared.lane,
-            _prepared_validation_statuses(prepared))
+        runtime = prepared.runtime
+        _transfer_settled_validation_status!(prepared.lane,
+            runtime.execution_gate, runtime.validation_host)
         push!(seen, prepared)
     end
     for dependency in receipt.dependencies

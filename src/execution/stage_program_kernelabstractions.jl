@@ -233,11 +233,10 @@ function _settle_lane_tail!(lane::_KernelAbstractionsLane, statuses::Tuple)
     return nothing
 end
 
-function _transfer_settled_validation_statuses!(
-        lane::_KernelAbstractionsLane, statuses::Tuple)
-    isempty(statuses) && return nothing
+function _transfer_settled_validation_status!(
+        lane::_KernelAbstractionsLane, device, host)
     try
-        _transfer_validation_statuses!(statuses)
+        _transfer_validation_status!(device, host)
     catch error
         _poison_lane!(lane, error)
         rethrow()
