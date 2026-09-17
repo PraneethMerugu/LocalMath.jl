@@ -8,11 +8,20 @@ const _ORDERED_FOLD_BLOCK = 256
 struct _OrderedFoldStageWorkspace{V, O, S, X, R, T}
     values::V; order::O; status::S; validation::X; state::R; tree::T
 end
-struct _OrderedFoldRecurrenceStage{F, A, P, G}
+struct _DirectSparseSourceTraversal end
+struct _CompactedPrefixTraversal end
+
+_ordered_fold_recurrence_traversal(::_SourceOrder) =
+    _DirectSparseSourceTraversal()
+_ordered_fold_recurrence_traversal(::_PreparedCanonicalBy) =
+    _CompactedPrefixTraversal()
+
+struct _OrderedFoldRecurrenceStage{F, A, P, G, T}
     fields::F
     accesses::A
     prefix::P
     gate::G
+    traversal::T
     source_count::Int32
 end
 struct _OrderedFoldStagePreparation{B, S, W, V}
@@ -347,6 +356,8 @@ end
     end
 end
 
+_ordered_fold_stage_launch_order!(backend, ::_SourceOrder, workspace) = nothing
+
 function _ordered_fold_stage_launch_order!(backend, order_law, workspace)
     extent = length(workspace.order)
     width = 2
@@ -365,8 +376,61 @@ function _ordered_fold_stage_launch_order!(backend, order_law, workspace)
     return nothing
 end
 
-@inline function _ordered_fold_stage_execute!(run)
+@inline function _ordered_fold_stage_apply_item!(
+        run, accumulator, item::Int32, position::Int32
+    )
     workspace = run.workspace
+    step = run.transition(
+        accumulator,
+        @inbounds(workspace.values[item]), item,
+        _stage_reads(
+            run.stage, item,
+            _OrderedFoldEvaluationValidation(workspace.status)
+        )
+    )
+    _ordered_fold_stage_success(run) || return false
+    code, component_index, witness = _ordered_fold_stage_validate_step!(
+        run.state, workspace.state, step
+    )
+    if code != 0
+        _ordered_fold_stage_fail!(
+            run, code, component_index, item, position, witness
+        )
+        return false
+    end
+    _ordered_fold_stage_apply_step!(run.state, workspace.state, step)
+    return !step.halt
+end
+
+@inline function _ordered_fold_stage_recur!(
+        run, ::_DirectSparseSourceTraversal, accumulator
+    )
+    position = Int32(0)
+    for source_item in Int32(1):run.stage.source_count
+        item = @inbounds run.workspace.order[source_item]
+        item == 0 && continue
+        position += Int32(1)
+        _ordered_fold_stage_apply_item!(
+            run, accumulator, item, position
+        ) || return
+    end
+    return
+end
+
+@inline function _ordered_fold_stage_recur!(
+        run, ::_CompactedPrefixTraversal, accumulator
+    )
+    for position in Int32(1):run.stage.source_count
+        item = @inbounds run.workspace.order[position]
+        item == 0 && break
+        _ordered_fold_stage_apply_item!(
+            run, accumulator, item, position
+        ) || return
+    end
+    return
+end
+
+@inline function _ordered_fold_stage_execute!(run)
     _ordered_fold_stage_prefix_ok(run) || return
     gate = _stage_gate_open(
         run.stage.gate, run.stage,
@@ -381,30 +445,7 @@ end
         return _ordered_fold_stage_fail!(run, Int32(_CANDIDATE_STATUS_INVALID_CONTROL))
     _ordered_fold_stage_success(run) || return
     accumulator = _prepared_fold_accumulator(run.workspace.state)
-    for position in Int32(1):run.stage.source_count
-        item = @inbounds workspace.order[position]
-        item == 0 && break
-        step = run.transition(
-            accumulator,
-            @inbounds(workspace.values[item]), item,
-            _stage_reads(
-                run.stage, item,
-                _OrderedFoldEvaluationValidation(workspace.status)
-            )
-        )
-        _ordered_fold_stage_success(run) || return
-        code, component_index, witness =
-            _ordered_fold_stage_validate_step!(
-            run.state, run.workspace.state, step
-        )
-        code == 0 || return _ordered_fold_stage_fail!(
-            run, code,
-            component_index, item, position, witness
-        )
-        _ordered_fold_stage_apply_step!(run.state, run.workspace.state, step)
-        step.halt && return
-    end
-    return
+    return _ordered_fold_stage_recur!(run, run.stage.traversal, accumulator)
 end
 
 @generated function _ordered_fold_stage_commit_item!(
@@ -568,6 +609,7 @@ function _execute_ordered_fold_stage!(
     recurrence_stage = _OrderedFoldRecurrenceStage(
         prepared.stage.fields, prepared.stage.accesses,
         prepared.stage.control.prefix, prepared.stage.control.gate,
+        _ordered_fold_recurrence_traversal(law.order),
         prepared.stage.source_count
     )
     boundary_parameters = (;
