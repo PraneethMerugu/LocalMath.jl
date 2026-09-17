@@ -534,34 +534,37 @@ function _collect_launch_order!(backend, plan, workspace)
     items = div(candidates, _collect_width(plan))
     prefix = _compacted_scan_level(workspace.prefix, 0, items)
     extent = max(items, 1)
-    _compacted_scatter_kernel!(backend, min(extent, _COMPACTED_BLOCK), extent)(
+    _launch_1d!(_compacted_scatter_kernel!, backend, extent, Val(_COMPACTED_BLOCK),
         workspace.valid, workspace.item_counts, prefix, workspace.order_a,
         workspace.positions, workspace.count, Val(_collect_width(plan)),
-        Int32(items); ndrange = extent)
+        Int32(items))
     plan.sort_required || return nothing
     local_extent = max(cld(candidates, _COMPACTED_BLOCK), 1) * _COMPACTED_BLOCK
-    _compacted_local_bitonic_kernel!(backend, _COMPACTED_BLOCK, local_extent)(
-        plan, workspace, workspace.count, Int32(candidates); ndrange = local_extent)
+    _launch_1d!(_compacted_local_bitonic_kernel!, backend, local_extent,
+        Val(_COMPACTED_BLOCK),
+        plan, workspace, workspace.count, Int32(candidates))
     width, to_b = _COMPACTED_BLOCK, true
     while width < candidates
         source, destination = to_b ? (workspace.order_a, workspace.order_b) :
             (workspace.order_b, workspace.order_a)
-        _compacted_merge_kernel!(backend, min(candidates, _COMPACTED_BLOCK), candidates)(
+        _launch_1d!(_compacted_merge_kernel!, backend, candidates,
+            Val(_COMPACTED_BLOCK),
             plan, workspace, source, destination, workspace.count, Int32(width),
-            Int32(candidates); ndrange = candidates)
+            Int32(candidates))
         width *= 2
         to_b = !to_b
     end
     if _is_grouped(plan.groups)
         groups = Int(plan.groups.count) + 1
-        _compacted_directory_kernel!(backend, min(groups, _COMPACTED_BLOCK), groups)(
-            workspace, _collect_final_order(plan, workspace), Int32(plan.groups.count);
-            ndrange = groups)
+        _launch_1d!(_compacted_directory_kernel!, backend, groups,
+            Val(_COMPACTED_BLOCK),
+            workspace, _collect_final_order(plan, workspace), Int32(plan.groups.count))
     end
     if _is_canonical_order(plan.order)
         extent = max(candidates, 1)
-        _compacted_validate_order_kernel!(backend, min(extent, _COMPACTED_BLOCK), extent)(
-            plan, workspace, _collect_final_order(plan, workspace); ndrange = extent)
+        _launch_1d!(_compacted_validate_order_kernel!, backend, extent,
+            Val(_COMPACTED_BLOCK),
+            plan, workspace, _collect_final_order(plan, workspace))
     end
     return nothing
 end
@@ -574,9 +577,9 @@ function _collect_publish_chunk!(backend, plans::Tuple, workspaces::Tuple,
     end
     groupeds = map(plan -> _collect_grouped(plan.groups), plans)
     extent = maximum(Int, extents)
-    _compacted_publish_ports_kernel!(backend,
-        min(extent, _COMPACTED_BLOCK), extent)(storages, workspaces, gate,
-        groupeds, extents; ndrange = extent)
+    _launch_1d!(_compacted_publish_ports_kernel!, backend, extent,
+        Val(_COMPACTED_BLOCK),
+        storages, workspaces, gate, groupeds, extents)
     return nothing
 end
 
@@ -625,10 +628,11 @@ function _execute_collect_stage!(prepared::_CollectStagePreparation,
     predecessor_statuses = (relation_guard, predecessors...)
     extent = max(Int(execution.stage.source_count),
         maximum((Int(plan.candidate_count) for plan in execution.plans); init = 0), 1)
-    _collect_stage_reset_kernel!(backend, min(extent, _COMPACTED_BLOCK), extent)(
+    _launch_1d!(_collect_stage_reset_kernel!, backend, extent,
+        Val(_COMPACTED_BLOCK),
         execution.workspaces, execution.status,
         execution.gate, prepared.validation, lease_index,
-        Int32(extent); ndrange = extent)
+        Int32(extent))
     _launch_stage_relation_receipt!(backend, relation_guard,
         prepared.validation, program_validation, lease_index)
     _collect_stage_evaluate_kernel!(backend)(qualified, execution.plans,

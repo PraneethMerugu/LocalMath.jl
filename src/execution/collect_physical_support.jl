@@ -197,8 +197,8 @@ function _compacted_launch_prefix_scan!(backend, item_counts, prefix_storage,
     output = _compacted_scan_level(prefix_storage, prefix_offset, current)
     sums = _compacted_scan_level(sums_storage, sums_offset, blocks)
     extent = blocks * _COMPACTED_BLOCK
-    _compacted_scan_block_kernel!(backend, _COMPACTED_BLOCK, extent)(
-        item_counts, output, sums, Int32(current); ndrange = extent)
+    _launch_1d!(_compacted_scan_block_kernel!, backend, extent,
+        Val(_COMPACTED_BLOCK), item_counts, output, sums, Int32(current))
     prefix_offset += current
     sums_offset += blocks
     current = blocks
@@ -208,8 +208,8 @@ function _compacted_launch_prefix_scan!(backend, item_counts, prefix_storage,
         output = _compacted_scan_level(prefix_storage, prefix_offset, current)
         sums = _compacted_scan_level(sums_storage, sums_offset, blocks)
         extent = blocks * _COMPACTED_BLOCK
-        _compacted_scan_block_kernel!(backend, _COMPACTED_BLOCK, extent)(
-            input, output, sums, Int32(length(input)); ndrange = extent)
+        _launch_1d!(_compacted_scan_block_kernel!, backend, extent,
+            Val(_COMPACTED_BLOCK), input, output, sums, Int32(length(input)))
         prefix_offset += current
         sums_offset += blocks
         current <= _COMPACTED_BLOCK && break
@@ -229,8 +229,8 @@ function _compacted_launch_prefix_scan!(backend, item_counts, prefix_storage,
         prefix = _compacted_scan_level(prefix_storage, child_offset, size)
         parent = _compacted_scan_level(prefix_storage, parent_offset, parent_size)
         extent = max(length(prefix), 1)
-        _compacted_scan_add_kernel!(backend, min(extent, _COMPACTED_BLOCK), extent)(
-            prefix, parent, Int32(length(prefix)); ndrange = extent)
+        _launch_1d!(_compacted_scan_add_kernel!, backend, extent,
+            Val(_COMPACTED_BLOCK), prefix, parent, Int32(length(prefix)))
     end
     return nothing
 end

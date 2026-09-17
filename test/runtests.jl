@@ -16,6 +16,7 @@ const LOCALMATH_INCLUDED_TESTS = (
     "test_unique_stage.jl",
     "test_stage_program_lifecycle.jl",
     "test_execution_receipts.jl",
+    "test_launch_contract.jl",
     "test_reduce_stage.jl",
     "test_reduction_control.jl",
     "test_resolve_stage.jl",
