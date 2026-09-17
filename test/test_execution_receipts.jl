@@ -190,6 +190,41 @@ end
     @test healthy_storage == Int32[81, 82]
 end
 
+@testset "validation settlement rejects an unprepared stage reference" begin
+    prepared, _ = _receipt_test_preparation(Int32(90))
+    receipt = LWER.execute!(prepared)
+    status = prepared.runtime.execution_gate
+    lease_index = receipt.lease_index
+    @inbounds begin
+        status[LWER._VALIDATION_FAILURE_CLASS, lease_index] = UInt32(1)
+        status[LWER._VALIDATION_STAGE_INDEX, lease_index] =
+            reinterpret(UInt32, Int32(typemax(Int32)))
+    end
+
+    failure = try
+        wait(receipt)
+        nothing
+    catch error
+        error
+    end
+    @test failure isa LWER.LocalMathValidationError
+    @test failure.contract === :validation_status_stage
+    @test failure.stage === :wait
+    @test failure.actual == (
+        recorded_stage = typemax(Int32),
+        failure_class = Int32(1),
+    )
+    @test !LWER.ispending(receipt)
+    @test LWER.submission_capacity(prepared).outstanding == 0
+    cached_failure = try
+        wait(receipt)
+        nothing
+    catch error
+        error
+    end
+    @test cached_failure === failure
+end
+
 @testset "provider failures poison only their provider scope" begin
     facts = fetch(@async begin
         failing, _ = _receipt_test_preparation(Int32(0);

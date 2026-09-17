@@ -111,10 +111,12 @@ end
 function _prepared_validation_error_at(prepared, lease_index::Int32)
     runtime = prepared.runtime
     host = runtime.validation_host
-    @inbounds host[_VALIDATION_FAILURE_CLASS, lease_index] == UInt32(0) &&
+    failure_class = @inbounds host[_VALIDATION_FAILURE_CLASS, lease_index]
+    failure_class == UInt32(0) &&
         return nothing
     recorded_stage = _validation_decode_int32(
-        @inbounds host[_VALIDATION_STAGE_INDEX, lease_index])
+        @inbounds host[_VALIDATION_STAGE_INDEX, lease_index]
+    )
     # Stage zero is publication suppression propagated from a failed dependency.
     # Exact receipt traversal remains the diagnostic and ordering authority.
     recorded_stage == 0 && return nothing
@@ -123,7 +125,17 @@ function _prepared_validation_error_at(prepared, lease_index::Int32)
         status.stage == recorded_stage || continue
         return _validated_publication_error(status, Int(lease_index))
     end
-    return nothing
+    return LocalMathValidationError(
+        "runtime validation status references an unprepared stage";
+        stage = :wait,
+        contract = :validation_status_stage,
+        expected = :prepared_stage,
+        actual = (
+            recorded_stage,
+            failure_class = _validation_decode_int32(failure_class),
+        ),
+        hint = "discard the prepared plan and report the invalid validation status",
+    )
 end
 
 function _exact_host_int(value, purpose; stage::Symbol = :plan)
