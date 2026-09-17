@@ -503,9 +503,8 @@ function _temporary_live_after(field::Field, stages)
     return false
 end
 
-function _pointwise_segment_entries(inputs, entries, binding)
-    temporary = Set(semantic_identity(value.field) for value in binding.fields
-        if value.ownership isa _TemporaryOwnership)
+Base.@noinline function _pointwise_segment_entries_from_temporary_identities(
+        inputs, entries, temporary_identities::Set)
     launches = _AbstractStageLoweringEntry[]
     index = 1
     while index <= length(entries)
@@ -574,7 +573,7 @@ function _pointwise_segment_entries(inputs, entries, binding)
             map(stage.publications) do publication
                 component = only(publication.components)
                 identity = semantic_identity(component.field)
-                elide = identity in temporary &&
+                elide = identity in temporary_identities &&
                     !_temporary_live_after(component.field, later)
                 elide || push!(retained, identity)
                 return elide ? _ForwardOnlyPointwise() :
@@ -587,6 +586,14 @@ function _pointwise_segment_entries(inputs, entries, binding)
         index += length(members)
     end
     return launches
+end
+
+function _pointwise_segment_entries(inputs, entries,
+        binding::_ValidatedStructuralBinding)
+    temporary_identities = Set(semantic_identity(value.field) for value in binding.fields
+        if value.ownership isa _TemporaryOwnership)
+    return _pointwise_segment_entries_from_temporary_identities(
+        inputs, entries, temporary_identities)
 end
 
 Base.@nospecializeinfer Base.@noinline function _stage_binding_slice(
