@@ -737,7 +737,7 @@ function _validate_device_fixed_relation_content(relation, storage)
         Int32(length(domain(relation))), Int32(length(codomain(relation))),
         Val(counts !== nothing); ndrange = max(length(domain(relation)), 1))
     host_status = zeros(Int32, 1)
-    copyto!(host_status, status)
+    _transfer_validation_status!(status, host_status)
     iszero(only(host_status)) || throw(LocalMathValidationError(
         "fixed relation device content violates its count or endpoint bounds";
         stage = :bind, contract = :fixed_relation_content,
