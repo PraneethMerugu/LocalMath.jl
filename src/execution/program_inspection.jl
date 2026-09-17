@@ -432,19 +432,22 @@ function _planned_stage_phases(entry::_StageLoweringEntry{
     phases = Any[_phase_fact(:ordered_fold_reset)]
     append!(phases, _planned_relation_phases(entry))
     push!(phases, _phase_fact(:ordered_fold_evaluate))
-    extent = nextpow(2, max(Int(entry.admission.stage.source_count), 1))
-    bitonic = 0
-    width = 2
-    while width <= extent
-        distance = width >>> 1
-        while distance >= 1
-            bitonic += 1
-            distance >>>= 1
+    order = only(entry.admission.stage.publications).law.order
+    if !(order isa _SourceOrder)
+        extent = nextpow(2, max(Int(entry.admission.stage.source_count), 1))
+        bitonic = 0
+        width = 2
+        while width <= extent
+            distance = width >>> 1
+            while distance >= 1
+                bitonic += 1
+                distance >>>= 1
+            end
+            width <<= 1
         end
-        width <<= 1
+        bitonic == 0 || push!(phases,
+            _phase_fact(:ordered_fold_bitonic, bitonic))
     end
-    bitonic == 0 || push!(phases,
-        _phase_fact(:ordered_fold_bitonic, bitonic))
     append!(phases, (_phase_fact(:ordered_fold_validate_initialize),
         _phase_fact(:ordered_fold_apply),
         _phase_fact(:ordered_fold_finalize)))

@@ -2,6 +2,8 @@ using Test
 import LocalMath
 const LWFSE = LocalMath
 
+include(joinpath(@__DIR__, "fixtures", "ordered_fold_source_order_contracts.jl"))
+
 struct OrderedFoldExecutionNode end
 struct OrderedFoldExecutionEvaluator end
 @inline (::OrderedFoldExecutionEvaluator)(item::Int32, reads, parameters) =
@@ -285,3 +287,5 @@ end
     @test prepared.runtime.launches[1].stage.stage.parameter_slots ==
         (LWFSE._ParameterSlot{1}(),)
 end
+
+ordered_fold_source_order_contracts(Array)
