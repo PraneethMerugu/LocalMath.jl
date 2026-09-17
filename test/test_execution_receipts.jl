@@ -82,16 +82,16 @@ end
     @test !LWER.ispending(event_4)
     @test LWER.ispending(event_a)
 
-    synchronizations =
+    completions =
         LWER.inspect(quaternary).realized.state.provider_scope_completions
     LWER.waitall(event_a, event_b, event_1, event_2)
     @test LWER.inspect(quaternary).realized.state.provider_scope_completions ==
-        synchronizations
+        completions
     @test all(prepared -> LWER.submission_capacity(prepared).outstanding == 0,
         (root_a, root_b, unary, binary, quaternary, wide))
     wait(event_a)
     @test LWER.inspect(quaternary).realized.state.provider_scope_completions ==
-        synchronizations
+        completions
 
     compatible, _ = _receipt_test_preparation(Int32(35);
         dependency_arity = 1)
@@ -134,8 +134,87 @@ end
     four_dependencies = (event_a, event_b, event_1, event_2)
     four_bytes = _warm_receipt_bookkeeping_bytes(
         warm_four, four_dependencies)
-    @test zero_bytes <= 4096
-    @test four_bytes <= 4096
+    @test zero_bytes <= 1024
+    @test four_bytes <= 1024
+end
+
+@testset "status copies complete one shared provider scope" begin
+    root, root_storage = _receipt_test_preparation(Int32(110))
+    dependent, dependent_storage = _receipt_test_preparation(Int32(120);
+        dependency_arity = 4)
+    root_event = LWER.execute!(root)
+    dependent_event = LWER.execute!(dependent;
+        dependencies = ntuple(_ -> root_event, 4))
+    root_before = LWER.inspect(root).realized.state
+    dependent_before = LWER.inspect(dependent).realized.state
+
+    wait(dependent_event)
+
+    root_after = LWER.inspect(root).realized.state
+    dependent_after = LWER.inspect(dependent).realized.state
+    @test root_storage == Int32[111, 112]
+    @test dependent_storage == Int32[121, 122]
+    @test root_after.validation_transfers ==
+        root_before.validation_transfers + 1
+    @test dependent_after.validation_transfers ==
+        dependent_before.validation_transfers + 1
+    @test dependent_after.provider_scope_completions ==
+        dependent_before.provider_scope_completions + 1
+
+    first, first_storage = _receipt_test_preparation(Int32(130))
+    second, second_storage = _receipt_test_preparation(Int32(140))
+    first_event = LWER.execute!(first)
+    second_event = LWER.execute!(second)
+    @test first_event.scope_ordinal < second_event.scope_ordinal
+    first_before = LWER.inspect(first).realized.state
+    second_before = LWER.inspect(second).realized.state
+
+    LWER.waitall(second_event, first_event)
+
+    first_after = LWER.inspect(first).realized.state
+    second_after = LWER.inspect(second).realized.state
+    @test first_storage == Int32[131, 132]
+    @test second_storage == Int32[141, 142]
+    @test first_after.validation_transfers ==
+        first_before.validation_transfers + 1
+    @test second_after.validation_transfers ==
+        second_before.validation_transfers + 1
+    @test second_after.provider_scope_completions ==
+        second_before.provider_scope_completions + 1
+end
+
+@testset "only same-scope unresolved dependencies reach recursive settlement" begin
+    published = Channel{Any}(1)
+    release = Channel{Nothing}(1)
+    producer_task = @async begin
+        producer, producer_storage = _receipt_test_preparation(Int32(150))
+        producer_event = LWER.execute!(producer)
+        put!(published, producer_event)
+        take!(release)
+        wait(producer_event)
+        producer_storage
+    end
+    producer_event = take!(published)
+    consumer, consumer_storage = _receipt_test_preparation(Int32(160);
+        dependency_arity = 1)
+
+    rejection = try
+        LWER.execute!(consumer; dependencies = (producer_event,))
+        nothing
+    catch error
+        error
+    end
+    @test rejection isa LWER.LocalMathValidationError
+    @test rejection.contract === :execution_dependency_scope
+    @test rejection.actual === :unresolved_cross_scope
+    @test consumer.submitted == 0
+
+    put!(release, nothing)
+    @test fetch(producer_task) == Int32[151, 152]
+    consumer_event = LWER.execute!(consumer;
+        dependencies = (producer_event,))
+    wait(consumer_event)
+    @test consumer_storage == Int32[161, 162]
 end
 
 @testset "receipt failures are exact, cached, and dependency-local" begin
@@ -175,6 +254,8 @@ end
         error
     end
     @test cached_failure === failure
+    @test LWER.submission_capacity(failing).outstanding == 0
+    @test LWER.submission_capacity(dependent).outstanding == 0
     producer_summary = only(LWER.inspect(child).dependencies)
     @test producer_summary.state === :semantic_failure
     @test producer_summary.failure === failure
@@ -188,6 +269,41 @@ end
     healthy, healthy_storage = _receipt_test_preparation(Int32(80))
     wait(LWER.execute!(healthy))
     @test healthy_storage == Int32[81, 82]
+end
+
+@testset "validation settlement rejects an unprepared stage reference" begin
+    prepared, _ = _receipt_test_preparation(Int32(90))
+    receipt = LWER.execute!(prepared)
+    status = prepared.runtime.execution_gate
+    lease_index = receipt.lease_index
+    @inbounds begin
+        status[LWER._VALIDATION_FAILURE_CLASS, lease_index] = UInt32(1)
+        status[LWER._VALIDATION_STAGE_INDEX, lease_index] =
+            reinterpret(UInt32, Int32(typemax(Int32)))
+    end
+
+    failure = try
+        wait(receipt)
+        nothing
+    catch error
+        error
+    end
+    @test failure isa LWER.LocalMathValidationError
+    @test failure.contract === :validation_status_stage
+    @test failure.stage === :wait
+    @test failure.actual == (
+        recorded_stage = typemax(Int32),
+        failure_class = Int32(1),
+    )
+    @test !LWER.ispending(receipt)
+    @test LWER.submission_capacity(prepared).outstanding == 0
+    cached_failure = try
+        wait(receipt)
+        nothing
+    catch error
+        error
+    end
+    @test cached_failure === failure
 end
 
 @testset "provider failures poison only their provider scope" begin

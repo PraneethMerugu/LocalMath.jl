@@ -94,34 +94,39 @@ _is_publication_validation_error(error) = error isa LocalMathValidationError &&
         :runtime_ordered_fold_validation,
     )
 
-_prepared_validation_statuses(prepared) = ()
-@inline function _prepared_validation_statuses(prepared::PreparedPlan)
-    # Every contextual Stage status views the same program-level device/host
-    # buffer. Settlement and success gating therefore need one representative,
-    # not a flattened tuple whose type grows with total program length.
-    return (first(prepared.runtime.launches).status,)
-end
-
-@inline _prepared_validation_status_groups(prepared::PreparedPlan) =
-    (map(launch -> launch.status, prepared.runtime.launches),)
-
-function _transfer_validation_statuses!(statuses::Tuple)
-    isempty(statuses) && return nothing
-    # Every Stage status is a contextual view of this same program-level
-    # buffer. One host-visible copy is therefore the complete settlement.
-    status = first(statuses)
-    copyto!(status.host, status.device)
+@inline function _transfer_validation_status!(device, host)
+    copyto!(host, device)
     return nothing
 end
 
 function _prepared_validation_error_at(prepared, lease_index::Int32)
-    for statuses in _prepared_validation_status_groups(prepared)
-        for status in statuses
-            error = _validated_publication_error(status, Int(lease_index))
-            error === nothing || return error
-        end
+    runtime = prepared.runtime
+    host = runtime.validation_host
+    failure_class = @inbounds host[_VALIDATION_FAILURE_CLASS, lease_index]
+    failure_class == UInt32(0) &&
+        return nothing
+    recorded_stage = _validation_decode_int32(
+        @inbounds host[_VALIDATION_STAGE_INDEX, lease_index]
+    )
+    # Stage zero is publication suppression propagated from a failed dependency.
+    # Exact receipt traversal remains the diagnostic and ordering authority.
+    recorded_stage == 0 && return nothing
+    for launch in runtime.launches
+        status = launch.status
+        status.stage == recorded_stage || continue
+        return _validated_publication_error(status, Int(lease_index))
     end
-    return nothing
+    return LocalMathValidationError(
+        "runtime validation status references an unprepared stage";
+        stage = :wait,
+        contract = :validation_status_stage,
+        expected = :prepared_stage,
+        actual = (
+            recorded_stage,
+            failure_class = _validation_decode_int32(failure_class),
+        ),
+        hint = "discard the prepared plan and report the invalid validation status",
+    )
 end
 
 function _exact_host_int(value, purpose; stage::Symbol = :plan)

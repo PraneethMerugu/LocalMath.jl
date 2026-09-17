@@ -690,9 +690,9 @@ function inspect(prepared::PreparedPlan; level = nothing)
             drained = prepared.drained,
             outstanding = prepared.outstanding,
             poisoned = prepared.poisoned,
-            provider_completions = _lane_wait_count(prepared.lane),
+            provider_completions = _lane_completion_count(prepared.lane),
             provider_scope_completions =
-                _lane_scope_wait_count(prepared.lane),
+                _lane_scope_completion_count(prepared.lane),
             validation_transfers = _lane_transfer_count(prepared.lane),
         ),
     )
@@ -772,8 +772,8 @@ function execution_contract(prepared::PreparedPlan)
         receipt_scope = _lane_wait_scope(lane),
         receipt_cumulative = _lane_cumulative(lane),
         receipt_selective = _lane_selective(lane),
-        observed_provider_completions = _lane_wait_count(lane),
-        observed_scope_completions = _lane_scope_wait_count(lane),
+        observed_provider_completions = _lane_completion_count(lane),
+        observed_scope_completions = _lane_scope_completion_count(lane),
         observed_validation_transfers = _lane_transfer_count(lane),
     )
 end

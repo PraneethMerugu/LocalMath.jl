@@ -69,6 +69,7 @@ end
 struct _PreparedStageProgram{E}
     launches::Vector{_AbstractPreparedStageLaunch}
     execution_gate::E
+    validation_host::Matrix{UInt32}
 end
 
 
@@ -962,7 +963,8 @@ Base.@nospecializeinfer Base.@noinline function _prepare_stage_program(
             annotated === error ? rethrow() : throw(annotated)
         end
     end
-    return _PreparedStageProgram(launches, workspace.execution_gate)
+    return _PreparedStageProgram(
+        launches, workspace.execution_gate, program_host)
 end
 
 # `_BoundLaw` already proves that the scientific bindings are mutually legal.
