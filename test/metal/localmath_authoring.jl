@@ -80,11 +80,21 @@ struct LocalMathMetalNode end
         backend)
     @test_throws LocalMath.LocalMathValidationError LocalMath.plan(
         mixed_device_bound; backend)
-    @test_throws LocalMath.LocalMathValidationError LocalMath.prepare(reduction,
-        assembled => LocalMath.Allocate(Int32(0)),
-        scatter => LocalMath.Allocate((;
-            endpoints=reshape(Int32[1, 3, 1], 1, 3)));
-        backend)
+    invalid_fixed_relation = try
+        LocalMath.prepare(reduction,
+            assembled => LocalMath.Allocate(Int32(0)),
+            scatter => LocalMath.Allocate((;
+                endpoints=reshape(Int32[1, 3, 1], 1, 3)));
+            backend)
+        nothing
+    catch error
+        error
+    end
+    @test invalid_fixed_relation isa LocalMath.LocalMathValidationError
+    @test invalid_fixed_relation.stage == :bind
+    @test invalid_fixed_relation.contract == :fixed_relation_content
+    @test invalid_fixed_relation.expected == (count = 0:1, endpoint = 1:2)
+    @test invalid_fixed_relation.actual == :invalid_device_content
 
     resolved = LocalMath.Field(destination, Int32)
     resolution = LocalMath.@localmath item ∈ source begin
