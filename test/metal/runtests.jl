@@ -4,6 +4,8 @@ using Metal
 using Statistics
 using Test
 
+include(joinpath(@__DIR__, "..", "telemetry_support.jl"))
+
 Metal.functional() || error("the selected Metal witness is not functional")
 Metal.allowscalar(false)
 
@@ -33,9 +35,14 @@ const LOCALMATH_METAL_WITNESSES = (
     @test discovered == Set(LOCALMATH_METAL_WITNESSES)
 end
 
-foreach(include, LOCALMATH_METAL_WITNESSES)
+for (ordinal, witness) in enumerate(LOCALMATH_METAL_WITNESSES)
+    LocalMathTestTelemetry.include_fixture(
+        @__MODULE__, joinpath(@__DIR__, witness), witness;
+        kind = "metal_fixture", ordinal,
+    )
+end
 
-for witness in (
+for (ordinal, witness) in enumerate((
         "lbm_d2q9.jl",
         "lattice_spring.jl",
         "matrix_free_fem.jl",
@@ -47,8 +54,12 @@ for witness in (
         "ordered_pgs_3d.jl",
         "ordered_stoichiometry.jl",
         "localmath_authoring.jl",
+    ))
+    LocalMathTestTelemetry.include_fixture(
+        @__MODULE__,
+        joinpath(@__DIR__, "..", "scientific_witnesses", witness), witness;
+        kind = "metal_scientific_fixture", ordinal,
     )
-    include(joinpath(@__DIR__, "..", "scientific_witnesses", witness))
 end
 
 @testset "LocalMath cross-domain Metal witnesses" begin

@@ -125,7 +125,10 @@ for test_file in LOCALMATH_INCLUDED_TESTS
     test_name = first(splitext(test_file))
     LOCALMATH_TEST_SUITE[test_name] = quote
         include($(joinpath(@__DIR__, "support.jl")))
-        include($(joinpath(@__DIR__, test_file)))
+        LocalMathTestTelemetry.include_fixture(
+            @__MODULE__, $(joinpath(@__DIR__, test_file)), $test_name;
+            kind = "parallel_fixture",
+        )
     end
 end
 
@@ -133,6 +136,7 @@ const LOCALMATH_TEST_INITIALIZATION = quote
     using Test
     import KernelAbstractions
     import LocalMath
+    include($(joinpath(@__DIR__, "telemetry_support.jl")))
 end
 
 ParallelTestRunner.runtests(
