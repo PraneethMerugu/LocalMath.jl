@@ -34,6 +34,9 @@ def main() -> int:
     usage_before = resource.getrusage(resource.RUSAGE_CHILDREN)
 
     log_handle = open(args.log, "wb") if args.log else None
+    process = None
+    exit_code = 127
+    launch_error = None
     try:
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         assert process.stdout is not None
@@ -44,9 +47,13 @@ def main() -> int:
                 log_handle.write(chunk)
         exit_code = process.wait()
     except KeyboardInterrupt:
-        process.terminate()
-        process.wait()
+        if process is not None:
+            process.terminate()
+            process.wait()
         exit_code = 130
+    except OSError as error:
+        launch_error = f"{type(error).__name__}: {error}"
+        print(launch_error, file=sys.stderr)
     finally:
         if log_handle:
             log_handle.close()
@@ -66,7 +73,8 @@ def main() -> int:
         "system_cpu_seconds": usage_after.ru_stime - usage_before.ru_stime,
         "max_child_rss_kib": max_rss_kib,
         "command": command,
-        "process_id": process.pid,
+        "process_id": process.pid if process is not None else None,
+        "launch_error": launch_error,
         "runner_os": os.environ.get("RUNNER_OS", platform.system()),
         "runner_arch": os.environ.get("RUNNER_ARCH", platform.machine()),
         "github_sha": os.environ.get("GITHUB_SHA"),

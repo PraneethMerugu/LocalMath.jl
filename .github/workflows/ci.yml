@@ -61,7 +61,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/localmath-telemetry/fixtures"
           measure=(python3 .github/ci/measure.py --output "$RUNNER_TEMP/localmath-telemetry" --job package)
           "${measure[@]}" --phase cache-observation --annotation cache_hit=${{ steps.cache.outputs.cache-hit }} -- python3 -c 'pass'
-          "${measure[@]}" --phase instantiate -- julia --project=. --startup-file=no -e 'using Pkg; Pkg.instantiate()'
+          "${measure[@]}" --phase instantiate -- env JULIA_PKG_PRECOMPILE_AUTO=0 julia --project=. --startup-file=no -e 'using Pkg; Pkg.instantiate()'
           "${measure[@]}" --phase precompile -- julia --project=. --startup-file=no -e 'using Pkg; Pkg.precompile()'
           "${measure[@]}" --phase import -- julia --project=. --startup-file=no -e 'using LocalMath'
           "${measure[@]}" --phase suite --log "$RUNNER_TEMP/localmath-telemetry/parallel-tests.log" -- julia --project=. --startup-file=no -e 'using Pkg; Pkg.test(; test_args=["--jobs=2", "--verbose"])'
@@ -97,7 +97,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/localmath-telemetry/fixtures"
           measure=(python3 .github/ci/measure.py --output "$RUNNER_TEMP/localmath-telemetry" --job scientific)
           "${measure[@]}" --phase cache-observation --annotation cache_hit=${{ steps.cache.outputs.cache-hit }} -- python3 -c 'pass'
-          "${measure[@]}" --phase instantiate -- julia --project=test/scientific_witnesses --startup-file=no -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
+          "${measure[@]}" --phase instantiate -- env JULIA_PKG_PRECOMPILE_AUTO=0 julia --project=test/scientific_witnesses --startup-file=no -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
           "${measure[@]}" --phase precompile -- julia --project=test/scientific_witnesses --startup-file=no -e 'using Pkg; Pkg.precompile()'
           "${measure[@]}" --phase import -- julia --project=test/scientific_witnesses --startup-file=no -e 'using LocalMath'
           "${measure[@]}" --phase suite --log "$RUNNER_TEMP/localmath-telemetry/scientific.log" -- julia --project=test/scientific_witnesses --startup-file=no -e 'include("test/scientific_witnesses/runtests.jl")'
@@ -125,7 +125,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/localmath-telemetry/fixtures"
           measure=(python3 .github/ci/measure.py --output "$RUNNER_TEMP/localmath-telemetry" --job macos-smoke)
           "${measure[@]}" --phase cache-observation --annotation cache_hit=${{ steps.cache.outputs.cache-hit }} -- python3 -c 'pass'
-          "${measure[@]}" --phase instantiate -- julia --project=. --startup-file=no -e 'using Pkg; Pkg.instantiate()'
+          "${measure[@]}" --phase instantiate -- env JULIA_PKG_PRECOMPILE_AUTO=0 julia --project=. --startup-file=no -e 'using Pkg; Pkg.instantiate()'
           "${measure[@]}" --phase precompile -- julia --project=. --startup-file=no -e 'using Pkg; Pkg.precompile()'
           "${measure[@]}" --phase import -- julia --project=. --startup-file=no -e 'using LocalMath'
           "${measure[@]}" --phase suite --log "$RUNNER_TEMP/localmath-telemetry/parallel-tests.log" -- julia --project=. --startup-file=no -e 'using Pkg; Pkg.test(; test_args=["--jobs=1", "--verbose", "test_public_api", "test_direct_pointwise_stage"])'
@@ -156,7 +156,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/localmath-telemetry/fixtures"
           measure=(python3 .github/ci/measure.py --output "$RUNNER_TEMP/localmath-telemetry" --job macos-package)
           "${measure[@]}" --phase cache-observation --annotation cache_hit=${{ steps.cache.outputs.cache-hit }} -- python3 -c 'pass'
-          "${measure[@]}" --phase instantiate -- julia --project=. --startup-file=no -e 'using Pkg; Pkg.instantiate()'
+          "${measure[@]}" --phase instantiate -- env JULIA_PKG_PRECOMPILE_AUTO=0 julia --project=. --startup-file=no -e 'using Pkg; Pkg.instantiate()'
           "${measure[@]}" --phase precompile -- julia --project=. --startup-file=no -e 'using Pkg; Pkg.precompile()'
           "${measure[@]}" --phase import -- julia --project=. --startup-file=no -e 'using LocalMath'
           "${measure[@]}" --phase suite --log "$RUNNER_TEMP/localmath-telemetry/parallel-tests.log" -- julia --project=. --startup-file=no -e 'using Pkg; Pkg.test(; test_args=["--jobs=2", "--verbose"])'
@@ -185,7 +185,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/localmath-telemetry"
           measure=(python3 .github/ci/measure.py --output "$RUNNER_TEMP/localmath-telemetry" --job docs)
           "${measure[@]}" --phase cache-observation --annotation cache_hit=${{ steps.cache.outputs.cache-hit }} -- python3 -c 'pass'
-          "${measure[@]}" --phase instantiate -- julia --project=docs --startup-file=no -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
+          "${measure[@]}" --phase instantiate -- env JULIA_PKG_PRECOMPILE_AUTO=0 julia --project=docs --startup-file=no -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
           "${measure[@]}" --phase precompile -- julia --project=docs --startup-file=no -e 'using Pkg; Pkg.precompile()'
           "${measure[@]}" --phase import -- julia --project=docs --startup-file=no -e 'using Documenter, LocalMath'
           "${measure[@]}" --phase suite --log "$RUNNER_TEMP/localmath-telemetry/docs.log" -- julia --project=docs --startup-file=no -e 'include("docs/make.jl")'
@@ -217,7 +217,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/localmath-telemetry/fixtures"
           measure=(python3 .github/ci/measure.py --output "$RUNNER_TEMP/localmath-telemetry" --job metal)
           "${measure[@]}" --phase cache-observation --annotation cache_hit=${{ steps.cache.outputs.cache-hit }} -- python3 -c 'pass'
-          "${measure[@]}" --phase instantiate -- julia --project=test/metal --startup-file=no -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
+          "${measure[@]}" --phase instantiate -- env JULIA_PKG_PRECOMPILE_AUTO=0 julia --project=test/metal --startup-file=no -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
           "${measure[@]}" --phase precompile -- julia --project=test/metal --startup-file=no -e 'using Pkg; Pkg.precompile()'
           "${measure[@]}" --phase import -- julia --project=test/metal --startup-file=no -e 'using KernelAbstractions, LocalMath, Metal'
           "${measure[@]}" --phase suite --log "$RUNNER_TEMP/localmath-telemetry/metal.log" -- julia --project=test/metal --startup-file=no -e 'include("test/metal/runtests.jl")'
