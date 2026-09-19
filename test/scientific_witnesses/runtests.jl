@@ -1,14 +1,23 @@
-include("lbm_d2q9.jl")
-include("lattice_spring.jl")
-include("matrix_free_fem.jl")
-include("zbuffer.jl")
-include("compacted_dem_contacts.jl")
-include("compacted_active_fem.jl")
-include("compacted_particle_cells.jl")
-include("ordered_rsa.jl")
-include("ordered_pgs_3d.jl")
-include("ordered_stoichiometry.jl")
-include("localmath_authoring.jl")
+include(joinpath(@__DIR__, "..", "telemetry_support.jl"))
+
+for (ordinal, witness) in enumerate((
+        "lbm_d2q9.jl",
+        "lattice_spring.jl",
+        "matrix_free_fem.jl",
+        "zbuffer.jl",
+        "compacted_dem_contacts.jl",
+        "compacted_active_fem.jl",
+        "compacted_particle_cells.jl",
+        "ordered_rsa.jl",
+        "ordered_pgs_3d.jl",
+        "ordered_stoichiometry.jl",
+        "localmath_authoring.jl",
+    ))
+    LocalMathTestTelemetry.include_fixture(
+        @__MODULE__, joinpath(@__DIR__, witness), witness;
+        kind = "scientific_fixture", ordinal,
+    )
+end
 
 using Test
 
