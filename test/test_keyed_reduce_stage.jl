@@ -9,6 +9,7 @@ include("fixtures/keyed_reduce_contracts.jl")
     Int32, Int32, +; seed = LMKR.RebuildFromIdentity(0.0f0))
 
 keyed_reduce_contract(KernelAbstractions.CPU())
+mixed_keyed_stage_sequence_contract(KernelAbstractions.CPU())
 
 struct KeyedReduceNode end
 struct KeyedReduceEvaluator end

@@ -65,17 +65,19 @@ function _keyed_reduce_physical(stage,
     return _KeyedReducePhysical(bounds, emission, key_order, fold, publication)
 end
 
-function _keyed_reduce_component_workspace_spec(root::Tuple, label::Symbol,
-        ::Type{T}, count::Int, path::Tuple = ()) where {T}
+function _keyed_reduce_component_workspace_spec(root::Tuple,
+        name_prefix::Symbol, label::Symbol, ::Type{T}, count::Int,
+        path::Tuple = ()) where {T}
     if fieldcount(T) == 0
         suffix = isempty(path) ? :scalar : Symbol(join(string.(path), :_))
-        return (_workspace_leaf(Symbol(:keyed_reduce_, label, :_, suffix),
+        return (_workspace_leaf(
+            Symbol(name_prefix, :_keyed_reduce_, label, :_, suffix),
             (root..., :keyed_reduce, label, path...), T, (count,);
             role = Symbol(:keyed_reduce_, label, :_component)),)
     end
     return reduce(1:fieldcount(T); init = ()) do leaves, field_index
-        (leaves..., _keyed_reduce_component_workspace_spec(root, label,
-            fieldtype(T, field_index), count,
+        (leaves..., _keyed_reduce_component_workspace_spec(
+            root, name_prefix, label, fieldtype(T, field_index), count,
             (path..., fieldname(T, field_index)))...)
     end
 end
@@ -89,10 +91,14 @@ function _keyed_reduce_stage_workspace_spec(stage; path::Tuple = (),
     candidates = Int(plan.bounds.candidate_count)
     prefix_count, sums_count = _compacted_scan_storage_lengths(candidates)
     leaves = (
-        _keyed_reduce_component_workspace_spec(path, :keys, K, candidates)...,
-        _keyed_reduce_component_workspace_spec(path, :values, V, candidates)...,
-        _keyed_reduce_component_workspace_spec(path, :reduced_keys, K, candidates)...,
-        _keyed_reduce_component_workspace_spec(path, :reduced_values, V, candidates)...,
+        _keyed_reduce_component_workspace_spec(
+            path, name_prefix, :keys, K, candidates)...,
+        _keyed_reduce_component_workspace_spec(
+            path, name_prefix, :values, V, candidates)...,
+        _keyed_reduce_component_workspace_spec(
+            path, name_prefix, :reduced_keys, K, candidates)...,
+        _keyed_reduce_component_workspace_spec(
+            path, name_prefix, :reduced_values, V, candidates)...,
         _workspace_leaf(Symbol(name_prefix, :_valid),
             (path..., :keyed_reduce, :valid), UInt8, (candidates,);
             role = :keyed_reduce_candidate_participation),

@@ -43,6 +43,57 @@ struct RebuildOrderedKeyedReduceEvaluator end
 @inline (::RebuildOrderedKeyedReduceEvaluator)(item::Int32, reads, parameters) =
     (; delta = LocalMath.KeyedContribution(Int32(3), item))
 
+struct FirstMixedKeyEvaluator end
+@inline (::FirstMixedKeyEvaluator)(item::Int32, reads, parameters) =
+    (; delta = LocalMath.KeyedContribution((item, UInt32(1)), Int32(1)))
+
+struct SecondMixedKeyEvaluator end
+@inline (::SecondMixedKeyEvaluator)(item::Int32, reads, parameters) =
+    (; delta = LocalMath.KeyedContribution((UInt32(1), -item), Int32(1)))
+
+function mixed_keyed_stage_sequence_contract(backend)
+    return @testset "successive keyed reductions retain distinct key layouts" begin
+        source = LocalMath.Space(KeyedReduceContractNode, 2)
+        first_key = Tuple{Int32,UInt32}
+        second_key = Tuple{UInt32,Int32}
+        first = LocalMath.Collection(LocalMath.KeyedValue{first_key,Int32}, 2)
+        second = LocalMath.Collection(LocalMath.KeyedValue{second_key,Int32}, 2)
+        function stage(destination, key_type, evaluator, label)
+            LocalMath.Stage(source, NamedTuple(), (
+                LocalMath.Publication(destination,
+                    LocalMath.KeyedReduce(key_type, Int32, +;
+                        maximum = 1,
+                        seed = LocalMath.RebuildFromIdentity(Int32(0)),
+                        retention = LocalMath.DropIdentityKeys());
+                    value = :delta),),
+                LocalMath.Evaluator(evaluator), LocalMath.Control(),
+                LocalMath.SourceOrigin(:keyed_reduce_contract, label))
+        end
+        law = LocalMath.sequence(
+            LocalMath.LocalLaw(stage(
+                first, first_key, FirstMixedKeyEvaluator(), 3)),
+            LocalMath.LocalLaw(stage(
+                second, second_key, SecondMixedKeyEvaluator(), 4)),
+        )
+        prepared = LocalMath.prepare(law,
+            first => LocalMath.Allocate(),
+            second => LocalMath.Allocate(); backend)
+        wait(LocalMath.execute!(prepared))
+        first_records = LocalMath.storage(prepared, first)
+        second_records = LocalMath.storage(prepared, second)
+        @test only(LocalMath.Adapt.adapt(Array, first_records.count)) == 2
+        @test only(LocalMath.Adapt.adapt(Array, second_records.count)) == 2
+        @test Set(LocalMath.Adapt.adapt(Array, first_records.records)) == Set([
+            LocalMath.KeyedValue((Int32(1), UInt32(1)), Int32(1)),
+            LocalMath.KeyedValue((Int32(2), UInt32(1)), Int32(1)),
+        ])
+        @test Set(LocalMath.Adapt.adapt(Array, second_records.records)) == Set([
+            LocalMath.KeyedValue((UInt32(1), Int32(-1)), Int32(1)),
+            LocalMath.KeyedValue((UInt32(1), Int32(-2)), Int32(1)),
+        ])
+    end
+end
+
 function _shared_keyed_program(backend, source_count, key_type, capacity,
         evaluator; maximum = 1, operation = +,
         seed = LocalMath.NewKeyIdentity(Int32(0)),
